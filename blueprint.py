@@ -1,9 +1,10 @@
 import asyncio
 import os
+import warnings
 from typing import List, Dict, Any, Optional, Tuple
 
 # --- Core Dependencies ---
-from lore import Flashback
+from lore import Flashback 
 from meat_box import Soul
 from iris_out import Iris
 from starlink import Aether
@@ -13,6 +14,10 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough, RunnableParallel
 from langchain_ollama import ChatOllama
+
+# Suppress Warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="opentelemetry")
+os.environ["USER_AGENT"] = "Ayra/1.0"
 
 class Assembly:
     """
@@ -38,21 +43,37 @@ class Assembly:
 
     # --- Station 1: Ignition ---
     def ignition(self, user_query: str, user_id: str = "default_user", mode: str = 'new') -> str:
-        """Sets up the session and logs the initial user turn."""
+        """
+        Sets up the session and logs the initial user turn.
+        Mode can be: 'new', 'continue' (latest), or a specific Session UUID.
+        """
         print(f"\n🔌 Station 1: Ignition (Mode: {mode})")
         self.active_user_id = user_id
         
-        if mode == 'new':
-            self.session_id = self.memory.new_session()
-        else:
+        if mode == 'continue':
             self.session_id = self.memory.get_latest_session_id()
-            if not self.session_id:
+            if self.session_id:
+                print(f"   ↪️ Resuming Latest Session: {self.session_id}")
+            else:
                 print("   ⚠️ No previous session found. Starting new.")
                 self.session_id = self.memory.new_session()
+                
+        elif mode != 'new':
+            self.session_id = mode
+            print(f"   ↪️ Resuming Specific Session: {self.session_id}")
+            
+        else: # 'new'
+            self.session_id = self.memory.new_session()
+            print(f"   ✅ New Session Created: {self.session_id}")
 
-        # Log User Input
-        self.memory.log_turn(self.session_id, self.active_user_id, user_query, ai_assistant="Orchestrator")
-        print(f"   ✅ Session Active: {self.session_id}")
+        self.memory.log_turn(
+            self.session_id, 
+            sender=self.active_user_id, 
+            content=user_query, 
+            ai_assistant=None,  
+            model_used=None
+        )
+        
         return self.session_id
 
     # --- Station 2: Ingest Materials ---
@@ -61,14 +82,8 @@ class Assembly:
         print(f"\n📥 Station 2: Ingest Materials")
         
         if source_path:
-            # 1. Ingest (if path provided)
-            # We run this in a thread to avoid blocking the event loop
-            # self.iris.rag_ingest(source_path) # This is synchronous in Iris currently
-            # For async wrapper:
-            pass # Iris ingestion is synchronous, usually fast enough or should be threaded if huge
             self.iris.rag_ingest(source_path)
 
-        # 2. Retrieve Context
         context = self.iris.get_context(query, n_results=3)
         self.raw_context = context if context else "No external context found."
         print(f"   ✅ Context Loaded ({len(self.raw_context)} chars)")
@@ -76,27 +91,22 @@ class Assembly:
     # --- Internal Factory: Persona Config ---
     def configure_persona(self, role_name: str, **kwargs) -> Tuple[str, ChatOllama]:
         """
-        Fetches persona from MeatBox and prepares the system prompt.
-        Returns (system_prompt_str, chat_model_object)
+        Fetches persona from Soul and prepares the system prompt.
         """
-        # 1. Fetch Config
         persona_conf = self.soul.get_assistant(role_name)
         model_name = persona_conf.get('model_preference', self.default_model)
         
-        # 2. Build Prompt
-        # We inject the RAG context into the prompt construction as 'additional_instructions'
         context_instruction = f"\n\nCONTEXT FROM IRIS:\n{self.raw_context}"
         
         system_prompt = self.soul.build_persona_prompt(
             role_name, 
             additional_instructions=context_instruction,
-            **kwargs # Pass dynamic vars like grade=5
+            **kwargs 
         )
         
-        # 3. Init Model
         llm = ChatOllama(model=model_name, temperature=0.7)
         
-        self.active_persona_config = persona_conf # Store for logging
+        self.active_persona_config = persona_conf
         return system_prompt, llm
 
     # --- Station 3: Fabricate Content ---
@@ -107,11 +117,6 @@ class Assembly:
                                 kwargs: Dict[str, Any] = None):
         """
         The Core Engine. Runs the LLM chains based on the workflow type.
-        
-        Workflows:
-        - 'once': Single Agent.
-        - 'sequential': Chain of Agents (A -> B -> C). Output of A is input to B.
-        - 'parallel': Debate/Synthesis (A & B parallel -> C Judge).
         """
         print(f"\n⚙️ Station 3: Fabricate Content (Workflow: {workflow})")
         
@@ -120,93 +125,62 @@ class Assembly:
 
         try:
             if workflow == 'once':
-                # --- Workflow: Single Shot ---
                 role = roles[0]
                 sys_prompt, llm = self.configure_persona(role, **kwargs)
-                
                 print(f"   ↳ Running Single Chain with Role: {role}")
                 
-                prompt = ChatPromptTemplate.from_messages([
-                    ("system", sys_prompt),
-                    ("human", "{input}")
-                ])
+                prompt = ChatPromptTemplate.from_messages([("system", sys_prompt), ("human", "{input}")])
                 chain = prompt | llm | StrOutputParser()
                 self.final_content = await chain.ainvoke({"input": scenario})
 
             elif workflow == 'sequential':
-                # --- Workflow: Sequential (Chain of Command) ---
-                # Example: Brainstormer -> Writer -> Editor
                 print(f"   ↳ Running Sequential Chain: {roles}")
-                
                 chain_history = ""
-                current_input = scenario
-                
                 for i, role in enumerate(roles):
                     print(f"     ➜ Step {i+1}: {role}")
-                    sys_prompt, llm = self.configure_persona(role, **kwargs)
+                    sys_prompt, llm = self.configure_persona(role, **kwargs.get(role, {}))
                     
-                    # Update prompt to include previous output/context
                     if i == 0:
                         step_input = scenario
                     else:
-                        step_input = f"Original Request: {scenario}\n\nPrevious Output to Refine/Use:\n{chain_history}\n\nYour Task: Build upon or edit the above."
+                        step_input = f"Original Request: {scenario}\n\nPrevious Output:\n{chain_history}\n\nTask: Build upon/refine this."
                     
-                    prompt = ChatPromptTemplate.from_messages([
-                        ("system", sys_prompt),
-                        ("human", "{input}")
-                    ])
+                    prompt = ChatPromptTemplate.from_messages([("system", sys_prompt), ("human", "{input}")])
                     chain = prompt | llm | StrOutputParser()
-                    
                     response = await chain.ainvoke({"input": step_input})
-                    
-                    # For sequential, the "final" content is the output of the LAST step,
-                    # but we keep history for context if needed.
                     chain_history = response 
-                
                 self.final_content = chain_history
 
             elif workflow == 'parallel':
-                # --- Workflow: Parallel Debate & Judge ---
-                # Logic: Run first N-1 roles in parallel. Run the LAST role as the Judge/Synthesizer.
                 if len(roles) < 2:
                     print("⚠️ Parallel workflow requires at least 2 roles.")
                     return
 
-                # The Judge is the last role in the list
                 judge_role = roles[-1]
                 debate_roles = roles[:-1]
                 
-                print(f"   ↳ Running Parallel Swarm: {debate_roles}")
-                print(f"   ↳ Judge/Synthesizer: {judge_role}")
+                print(f"   ↳ Parallel Swarm: {debate_roles} -> Judge: {judge_role}")
                 
-                # 1. Create Parallel Chains
                 chains = {}
                 for role in debate_roles:
-                    sys_p, llm = self.configure_persona(role, **kwargs)
+                    sys_p, llm = self.configure_persona(role, **kwargs.get(role, {}))
                     prompt = ChatPromptTemplate.from_messages([("system", sys_p), ("human", "{input}")])
                     chains[role] = (prompt | llm | StrOutputParser())
                 
-                # 2. Run Parallel
                 map_chain = RunnableParallel(**chains)
                 debate_results = await map_chain.ainvoke({"input": scenario})
                 
-                # 3. Format Debate Output for Judge
-                debate_transcript = "\n\n".join([f"--- {r.upper()} ARGUMENT ---\n{content}" for r, content in debate_results.items()])
+                debate_transcript = "\n\n".join([f"--- {r.upper()} --- \n{content}" for r, content in debate_results.items()])
                 
-                # 4. Run Judge
                 print(f"     ➜ Synthesizing with {judge_role}...")
-                sys_prompt_judge, llm_judge = self.configure_persona(judge_role, **kwargs)
-                judge_input = f"Scenario: {scenario}\n\nArguments from Team:\n{debate_transcript}\n\nTask: Synthesize, judge, or merge these into a final answer."
+                sys_prompt_judge, llm_judge = self.configure_persona(judge_role, **kwargs.get(judge_role, {}))
+                judge_input = f"Scenario: {scenario}\n\nArguments:\n{debate_transcript}\n\nTask: Synthesize."
                 
-                prompt_judge = ChatPromptTemplate.from_messages([
-                    ("system", sys_prompt_judge),
-                    ("human", "{input}")
-                ])
+                prompt_judge = ChatPromptTemplate.from_messages([("system", sys_prompt_judge), ("human", "{input}")])
                 chain_judge = prompt_judge | llm_judge | StrOutputParser()
-                
                 self.final_content = await chain_judge.ainvoke({"input": judge_input})
 
-            # Log the AI's final turn
+            # Log Final Turn
             assistant_name = self.active_persona_config.get('ai_name', 'Assembly')
             model = self.active_persona_config.get('model_preference', 'Unknown')
             
@@ -217,47 +191,59 @@ class Assembly:
                 ai_assistant=assistant_name,
                 model_used=model
             )
-            
-            # Update summary
-            summary = f"Workflow '{workflow}' completed with roles {roles}."
-            self.memory.update_chat_summary(self.session_id, summary)
-            
             print("   ✅ Fabrication Complete.")
 
         except Exception as e:
             print(f"❌ Fabrication Failed: {e}")
-            self.final_content = f"Error during fabrication: {e}"
+            self.final_content = f"Error: {e}"
 
     # --- Station 4: Forge Artifacts ---
     async def forge_artifacts(self, outputs: List[str]):
-        """
-        Parallel production of files (PDF, Word, Excel) and Signals.
-        """
+        """Parallel production of files and signals."""
         print(f"\n🔨 Station 4: Forge Artifacts {outputs}")
-        
         tasks = []
         
-        # 1. Document Forging
         if 'word' in outputs:
             tasks.append(self.aether.forge_word(self.final_content, f"mission_{self.session_id[:8]}.docx"))
-        
         if 'pdf' in outputs:
             tasks.append(self.aether.forge_pdf(self.final_content, f"mission_{self.session_id[:8]}.pdf"))
-            
         if 'excel' in outputs:
             dummy_data = [{"Session": self.session_id, "Content": self.final_content[:100]}]
             tasks.append(self.aether.forge_excel(dummy_data, f"mission_{self.session_id[:8]}.xlsx"))
-
-        # 2. Signals
         if 'voice' in outputs:
             tasks.append(self.aether.broadcast(self.final_content[:500], save_file=f"brief_{self.session_id[:8]}.mp3")) 
 
-        # Execute all forge tasks concurrently
         if tasks:
             results = await asyncio.gather(*tasks)
-            print(f"   ✅ Artifacts Created: {results}")
+            print(f"   ✅ Artifacts Created.")
         else:
             print("   ⚠️ No artifacts requested.")
+
+    # --- Extra: On-Demand Summary ---
+    async def summarize_session(self):
+        """
+        Reads the full chat history of the current session and generates a concise summary.
+        """
+        print(f"\n📝 Generating Session Summary for {self.session_id}...")
+        
+        history = self.memory.get_session_history(self.session_id)
+        if not history:
+            print("   ⚠️ No history to summarize.")
+            return
+
+        transcript = "\n".join([f"{msg['sender']}: {msg['content']}" for msg in history])
+        
+        sys_prompt, llm = self.configure_persona("Summarizer") 
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", sys_prompt),
+            ("human", "Summarize this conversation context:\n\n{input}")
+        ])
+        chain = prompt | llm | StrOutputParser()
+        
+        summary_text = await chain.ainvoke({"input": transcript})
+        
+        self.memory.update_chat_summary(self.session_id, summary_text)
+        print(f"   ✅ Summary Updated: {summary_text[:100]}...")
 
     # --- Master Controller ---
     async def execute_assembly(self, 
@@ -266,50 +252,54 @@ class Assembly:
                                workflow: str = 'once', 
                                roles: List[str] = None, 
                                outputs: List[str] = None,
+                               session_mode: str = 'new', # 'new', 'continue', or UUID string
                                **persona_kwargs):
         """
-        Runs the full assembly line: Ignition -> Ingest -> Fabricate -> Forge.
+        Runs the full assembly line.
         """
         if not roles: roles = ["General"]
         if not outputs: outputs = []
 
-        # 1. Ignition
-        self.ignition(query)
+        # 1. Ignition (with dynamic mode)
+        self.ignition(query, mode=session_mode)
         
         # 2. Ingest
         self.ingest_materials(query, source)
         
-        # 3. Fabricate (Async)
+        # 3. Fabricate
         await self.fabricate_content(query, workflow, roles, kwargs=persona_kwargs)
         
-        # 4. Forge (Async)
+        # 4. Forge
         await self.forge_artifacts(outputs)
         
         return self.final_content
 
-# --- Verification Test Block ---
-if __name__ == "__main__":
+def sample_sequential_process():
     async def run_test_mission():
         orchestrator = Assembly()
-        
-        # Test Scenario: Parallel Debate
-        query = "Discuss the ethics of AI sentience."
-        # Roles: 2 Debaters + 1 Judge
-        # Assuming we have "Propaganda" (Advocate) and "Critique" (Judge) roles in DB. 
-        # Using "General" as the skeptic if needed or just re-using roles.
-        roles = ["General", "General", "General"]
-        
+
+        print("\n🚀 STARTING COMPLEX SEQUENTIAL MISSION")
+
+        query = "Generate a simple multiplication problem for a 5th grader."
+
+        # Define the 3-step sequential workflow
+        roles = ["Math", "Story", "Professional Writer"]
+
+        # Define the desired output
         outputs = ['word']
-        
-        print("🚀 STARTING PARALLEL MISSION")
+
         result = await orchestrator.execute_assembly(
-            query=query, 
-            workflow='parallel',
+            query=query,
+            workflow='sequential',
             roles=roles,
-            outputs=outputs
+            outputs=outputs,
         )
-        
+
         print("\n🏁 MISSION COMPLETE")
-        print(f"Final Output Preview:\n{result}...")
+        print(f"Final Output (from Professional Writer):\n{result}")
 
     asyncio.run(run_test_mission())
+
+# --- Verification Test Block ---
+if __name__ == "__main__":
+    sample_sequential_process()

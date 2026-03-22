@@ -35,14 +35,21 @@ def export_rocket(fb):
     fb.export_table_to_csv("prompt_templates", "prompt_templates.csv")
     print("   ✅ Export Complete.")
 
-if __name__ == "__main__":
-    fb_instance = Flashback("ayra_memory.db")
-    
-    # Check if CSVs exist before trying to sync
-    if not os.path.exists("ai_assistants.csv") or not os.path.exists("prompt_templates.csv"):
-        print("⚠️ CSV files not found. Creating initial export from DB...")
+def upload_csv_to_db():
+    db_path = "ayra_memory.db"
+    fb_instance = Flashback(db_path)
+
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "export":
         export_rocket(fb_instance)
     else:
-        # Standard flow: Upload (Sync) then Export to ensure consistency
-        launch_rocket(fb_instance)
-        export_rocket(fb_instance)
+        # Standard workflow: Sync from CSV, then Export to keep consistent
+        if not os.path.exists("ai_assistants.csv") or not os.path.exists("prompt_templates.csv"):
+            print(
+                "❌ CSV files not found. Please ensure 'ai_assistants.csv' and 'prompt_templates.csv' are in the directory.")
+        else:
+            launch_rocket(fb_instance)
+            export_rocket(fb_instance)
+
+
+if __name__ == "__main__":
+   upload_csv_to_db()

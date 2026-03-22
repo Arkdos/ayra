@@ -3,8 +3,13 @@ import uuid
 import os
 import json
 import csv
+import warnings
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple, Any
+
+# --- Suppress Warnings ---
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="opentelemetry")
+os.environ["USER_AGENT"] = "Ayra/1.0"
 
 class Flashback(object):
     """
@@ -62,6 +67,7 @@ class Flashback(object):
             """)
 
             # 4. AI Assistants Table
+            # Note: Using PLURAL 'default_kwargs' per user instruction
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ai_assistants (
                     assistant_name TEXT PRIMARY KEY,
@@ -79,7 +85,8 @@ class Flashback(object):
                     user_name TEXT,
                     relationship TEXT,
                     word_limit INTEGER,
-                    threaten BOOLEAN
+                    threaten BOOLEAN,
+                    default_kwargs TEXT 
                 )
             """)
             
@@ -250,32 +257,33 @@ class Flashback(object):
     def upsert_assistant(self, **kwargs):
         """
         Inserts or updates an AI assistant configuration using a dictionary of arguments.
-        Dynamic kwargs allow flexibility for CSV importing.
         """
-        # Ensure mandatory PK exists
         if 'assistant_name' not in kwargs:
             print("❌ upsert_assistant failed: 'assistant_name' is required.")
             return
 
-        # Prepare specialized_skills (convert list to JSON string if needed)
-        if 'specialized_skills' in kwargs and isinstance(kwargs['specialized_skills'], list):
-            kwargs['specialized_skills'] = json.dumps(kwargs['specialized_skills'])
+        # Prepare JSON fields
+        # CRITICAL FIX: Ensure 'default_kwargs' matches the key passed from persona_rocket.py
+        for field in ['specialized_skills', 'default_kwargs']: 
+            if field in kwargs and isinstance(kwargs[field], (dict, list)):
+                kwargs[field] = json.dumps(kwargs[field])
         
-        # Define all columns and their default values (None)
+        # Define all columns
         columns = [
             'assistant_name', 'ai_name', 'model_preference', 'system_prompt_template', 
             'human_prompt_template', 'description', 'tone', 'specialized_skills',
             'language', 'explicit_filter', 'nsfw', 'personify', 'user_name', 
-            'relationship', 'word_limit', 'threaten'
+            'relationship', 'word_limit', 'threaten', 'default_kwargs'
         ]
         
-        # Construct the query dynamically based on provided keys (upserting all supported cols)
-        values = [kwargs.get(col) for col in columns]
+        # DEBUG: Print what we are trying to insert for defaults
+        # if 'default_kwargs' in kwargs:
+        #     print(f"DEBUG Upsert {kwargs['assistant_name']}: default_kwargs={kwargs['default_kwargs']}")
         
+        values = [kwargs.get(col) for col in columns]
         with self._get_connection() as conn:
             cursor = conn.cursor()
             placeholders = ",".join(["?"] * len(columns))
-            # Construct the UPDATE SET clause
             update_clause = ",".join([f"{col}=excluded.{col}" for col in columns if col != 'assistant_name'])
             
             query = f"""
@@ -295,18 +303,18 @@ class Flashback(object):
             row = cursor.fetchone()
             
             if row:
-                # Get column names from cursor description
                 col_names = [description[0] for description in cursor.description]
                 result = dict(zip(col_names, row))
                 
-                # Parse JSON fields and Booleans
-                if result.get('specialized_skills'):
-                    try:
-                        result['specialized_skills'] = json.loads(result['specialized_skills'])
-                    except json.JSONDecodeError:
-                        result['specialized_skills'] = []
+                # Parse JSON fields
+                for field in ['specialized_skills', 'default_kwargs']: # Using PLURAL
+                    if result.get(field):
+                        try:
+                            result[field] = json.loads(result[field])
+                        except json.JSONDecodeError:
+                            result[field] = [] if field == 'specialized_skills' else {}
                 
-                # Convert 1/0 integers to Booleans for flag columns
+                # Convert Booleans
                 bool_cols = ['explicit_filter', 'nsfw', 'personify', 'threaten']
                 for col in bool_cols:
                     if col in result:
@@ -349,9 +357,7 @@ class Flashback(object):
     # --- CSV Import / Export Utilities ---
 
     def export_table_to_csv(self, table_name: str, filepath: str):
-        """
-        Exports the entire contents of a table to a CSV file.
-        """
+        """Exports the entire contents of a table to a CSV file."""
         print(f"📦 Exporting table '{table_name}' to {filepath}...")
         try:
             with self._get_connection() as conn:
@@ -361,7 +367,6 @@ class Flashback(object):
                 
                 if not rows:
                     print(f"   ⚠️ Table '{table_name}' is empty. Creating empty CSV with headers.")
-                    # Get headers anyway
                     cursor.execute(f"PRAGMA table_info({table_name})")
                     headers = [info[1] for info in cursor.fetchall()]
                 else:
@@ -376,15 +381,7 @@ class Flashback(object):
             print(f"   ❌ Export failed: {e}")
 
     def import_csv_to_table(self, table_name: str, filepath: str, pk_column: str):
-        """
-        Reads a CSV file and upserts its data into the specified table.
-        Assumes the CSV headers match the table column names.
-        
-        Args:
-            table_name: The target table (e.g., 'ai_assistants').
-            filepath: Path to the source CSV file.
-            pk_column: The Primary Key column name used for conflict resolution (e.g., 'assistant_name').
-        """
+        """Reads a CSV file and upserts its data into the specified table."""
         print(f"📥 Importing from {filepath} into table '{table_name}'...")
         if not os.path.exists(filepath):
             print(f"   ❌ File not found: {filepath}")
@@ -403,7 +400,6 @@ class Flashback(object):
                 with self._get_connection() as conn:
                     cursor = conn.cursor()
                     
-                    # Prepare the upsert query dynamically
                     columns = ",".join(headers)
                     placeholders = ",".join(["?"] * len(headers))
                     update_clause = ",".join([f"{col}=excluded.{col}" for col in headers if col != pk_column])
@@ -417,7 +413,6 @@ class Flashback(object):
                     
                     count = 0
                     for row in rows_to_insert:
-                        # Ensure values match the order of headers
                         values = [row[col] for col in headers]
                         cursor.execute(query, values)
                         count += 1
@@ -429,9 +424,19 @@ class Flashback(object):
 
 # --- Verification Test Block ---
 if __name__ == "__main__":
-    print("--- Flashback CSV Utilities Verification ---")
+    print("--- Lore (Flashback) System Verification ---")
     fb = Flashback("ayra_memory.db")
     
-    # Test Export
-    fb.export_table_to_csv("ai_assistants", "ai_assistants.csv")
-    fb.export_table_to_csv("prompt_templates", "prompt_templates.csv")
+    # Verify new column
+    fb.upsert_assistant(
+        assistant_name="TestBot",
+        ai_name="Tester",
+        model_preference="mistral",
+        system_prompt_template="Hello {name}",
+        default_kwargs={"name": "Friend"} # Using PLURAL
+    )
+    
+    config = fb.get_assistant_config("TestBot")
+    if config:
+        print(f"Retrieved Default Kwargs: {config['default_kwargs']}") # Using PLURAL
+        print("✅ DB Schema Update Verified.")
