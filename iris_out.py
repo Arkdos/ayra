@@ -173,8 +173,7 @@ class Iris:
             print(f"❌ Iris: Retrieval failed. {e}")
             return ""
 
-# --- Verification Test Block ---
-if __name__ == "__main__":
+def test():
 
     # Check imports first
     print(f"ℹ️ Docling Enabled: {HAS_DOCLING}")
@@ -205,8 +204,12 @@ if __name__ == "__main__":
     print("\n[TEST 5] Verifying Retrieval...")
     context = iris.get_context("How can I feel better about my finances?", n_results=1)
     if context:
-        print(f"   ✅ Context Found:\n{context.strip()[:200]}...")
+        print(f"   ✅ Context Found:\n{context.strip()}")
     else:
         print("   ❌ No Context Found.")
 
     print("\n✅ IRIS SYSTEM TEST COMPLETE.")
+
+# --- Verification Test Block ---
+if __name__ == "__main__":
+    test()
