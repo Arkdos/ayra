@@ -13,6 +13,7 @@ try:
     from langchain_core.messages import HumanMessage
     from langchain_text_splitters import RecursiveCharacterTextSplitter
     from langchain_community.document_loaders import WebBaseLoader, PyPDFLoader
+    from langchain_community.vectorstores.utils import filter_complex_metadata
 except ImportError as e:
     print(f"❌ CRITICAL ERROR: Missing or incompatible LangChain packages.\n   Error: {e}")
     print("   Please run: pip install -U langchain-core langchain-ollama langchain-community langchain-chroma langchain-text-splitters")
@@ -91,7 +92,15 @@ class Iris:
 
         if docs:
             print(f"   ↳ Storing {len(docs)} chunks into Ayra Memory...")
-            self.vector_store.add_documents(docs)
+
+            # --- ADD THIS LINE HERE ---
+            # This strips the nested dictionaries that Docling creates
+            # so ChromaDB can handle the metadata.
+            clean_docs = filter_complex_metadata(docs)
+
+            # Change 'docs' to 'clean_docs' in the line below
+            self.vector_store.add_documents(clean_docs)
+
             print("✅ Iris: Ingestion Complete.")
         else:
             print("⚠️ Iris: No content extracted.")
