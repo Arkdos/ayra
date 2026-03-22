@@ -1,4 +1,4 @@
-from flashback import Flashback
+from lore import Flashback
 import os
 import sys
 

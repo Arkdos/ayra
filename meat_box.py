@@ -1,9 +1,9 @@
 from typing import Dict, List, Optional, Any
 import json
 import re
-from flashback import Flashback
+from lore import Flashback
 
-class MeatBox:
+class Soul(object):
     """
     The Persona Factory for the Ayra Framework.
     Manages specialized AI assistants ('Staff') using the Flashback database.

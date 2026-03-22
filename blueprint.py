@@ -4,16 +4,16 @@ from typing import List, Dict, Optional, Any
 
 # Framework Imports
 from iris_out import Iris
-from meatbox import MeatBox
-from flashback import Flashback
+from meat_box import Soul
+from lore import Flashback
 from starlink import Aether
 from langchain_ollama import ChatOllama
 
 
-class AyraOrchestrator:
+class Assembly:
     def __init__(self, db_path: str = "ayra_memory.db"):
         self.memory = Flashback(db_path=db_path)
-        self.meatbox = MeatBox(db_path=db_path)
+        self.soul = Soul(db_path=db_path)
         self.iris = Iris()
         self.aether = Aether()
         self.llm = ChatOllama(model="llama3")
@@ -53,10 +53,10 @@ class AyraOrchestrator:
     def configure_persona(self, role_name: str, **kwargs):
         """Pulls the specific 'Staff' from MeatBox and builds the system prompt."""
         print(f"🎭 Configuring Persona: {role_name}")
-        self.active_persona = self.meatbox.get_assistant(role_name)
+        self.active_persona = self.soul.get_assistant(role_name)
 
         # Merging raw context with the persona's base template
-        blueprint_prompt = self.meatbox.build_persona_prompt(
+        blueprint_prompt = self.soul.build_persona_prompt(
             role_name=role_name,
             additional_instructions=f"Context from materials:\n{self.raw_context}",
             **kwargs

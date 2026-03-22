@@ -4,6 +4,7 @@ import pandas as pd
 from docx import Document as DocxDocument
 from fpdf import FPDF
 import edge_tts
+from nicegui import ui
 
 
 class Aether:
@@ -91,6 +92,24 @@ class Aether:
             print(f"❌ Aether: Transmission failed. Check your internet connection or library version. Error: {e}")
             return None
 
+    def forge_gui(self, mission_name: str, content: str, paths: list):
+        """Spins up a local web UI to review the assembly line output."""
+
+        @ui.page('/mission_report')
+        def report():
+            with ui.column().classes('w-full items-center p-8'):
+                ui.label(f'MISSION: {mission_name}').classes('text-h4 font-bold')
+                ui.markdown(content).classes('border p-4 rounded bg-gray-100 w-full')
+
+                ui.label('Generated Artifacts').classes('text-h6 mt-4')
+                for path in paths:
+                    ui.link(os.path.basename(path), f'file://{path}')
+
+                ui.button('Close Dashboard', on_click=lambda: ui.run_javascript('window.close()'))
+
+        # Run in a non-blocking way or as a final step
+        ui.run(title="Ayra Mission Control", port=8080, reload=False, show=False)
+        print(f"🖥️ Aether: Dashboard live at http://localhost:8080/mission_report")
 
 # --- Verification ---
 if __name__ == "__main__":
