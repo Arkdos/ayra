@@ -180,7 +180,7 @@ class Soul(object):
 
 def sample_ai_construct():
     print("--- MeatBox Complex Assistant Test ---")
-    mb = MeatBox()
+    mb = Soul()
 
     # 1. Complex Assistant Construction
     # Scenario: Use "NSFW Writer" but force it to be "Safe" and write a children's story about dragons.
@@ -232,7 +232,7 @@ def sample_ai_construct():
         print("✅ SUCCESS: Complex assistant constructed correctly.")
 
 def inspect_single_assistant():
-    mb = MeatBox()
+    mb = Soul()
     mb.inspect_assistant('Math')
 
 # --- Verification Test Block ---

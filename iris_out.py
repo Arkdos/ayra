@@ -98,7 +98,6 @@ class Iris:
             # so ChromaDB can handle the metadata.
             clean_docs = filter_complex_metadata(docs)
 
-            # Change 'docs' to 'clean_docs' in the line below
             self.vector_store.add_documents(clean_docs)
 
             print("✅ Iris: Ingestion Complete.")
@@ -158,10 +157,10 @@ class Iris:
             
         return docs
 
-    def get_context(self, query: str, n_results: int = 5) -> str:
+    def get_context(self, query: str, n_results: int = 25) -> str:
         """Retrieves the most relevant context chunks for a given query."""
         print(f"🔍 Iris: Searching memory for -> '{query}'")
-        
+
         try:
             results = self.vector_store.similarity_search(query, k=n_results)
             context_str = ""
