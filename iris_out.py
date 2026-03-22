@@ -1,17 +1,34 @@
 import os
 import pandas as pd
-from typing import List, Union
-from langchain_community.document_loaders import DoclingLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_chroma import Chroma
-from langchain_ollama import OllamaEmbeddings, ChatOllama
-from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage
 import base64
+import sys
+from typing import List, Union
+
+
+# --- LangChain Imports (Defensive Loading) ---
+try:
+    from langchain_chroma import Chroma
+    from langchain_ollama import OllamaEmbeddings, ChatOllama
+    from langchain_core.documents import Document
+    from langchain_core.messages import HumanMessage
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    from langchain_community.document_loaders import WebBaseLoader, PyPDFLoader
+except ImportError as e:
+    print(f"❌ CRITICAL ERROR: Missing or incompatible LangChain packages.\n   Error: {e}")
+    print("   Please run: pip install -U langchain-core langchain-ollama langchain-community langchain-chroma langchain-text-splitters")
+    sys.exit(1)
+
+# Try importing Docling, fall back if missing/broken
+try:
+    from langchain_docling import DoclingLoader
+    HAS_DOCLING = True
+except ImportError:
+    print("⚠️ DoclingLoader not found or incompatible. Will fall back to standard loaders.")
+    HAS_DOCLING = False
 
 class Iris:
     """
-    AyraIris: The Vision & Knowledge Ingestion Engine for Ayra.
+    Iris: The Vision & Knowledge Ingestion Engine for Ayra.
     Handles RAG (Retrieval-Augmented Generation) from Web, PDF, Excel, and Images.
     Uses 'nomic-embed-text' for embeddings and persists data to './ayra_storage'.
     """
@@ -30,32 +47,37 @@ class Iris:
     def rag_ingest(self, source_path: str):
         """
         Intelligently ingests data from a source (URL, PDF, Excel, Image).
-        
-        Args:
-            source_path: File path or URL string.
         """
         print(f"👁️ Iris: Ingesting source -> {source_path}")
         
         docs = []
 
-        # 1. Image Handling (Llava Description)
+        # 1. Image Handling
         if source_path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
             description = self._process_image(source_path)
             docs = [Document(page_content=description, metadata={"source": source_path, "type": "image"})]
 
-        # 2. Excel/CSV Handling (Semantic Rows)
+        # 2. Excel/CSV Handling
         elif source_path.lower().endswith(('.xlsx', '.xls', '.csv')):
             docs = self._process_excel(source_path)
 
-        # 3. Web & PDF Handling (Docling - Structure Aware)
-        # DoclingLoader handles URLs (http/https) and local PDF paths automatically
+        # 3. URL & PDF Handling
         else:
             try:
-                # Docling is powerful for layout-aware parsing (tables/headers)
-                loader = DoclingLoader(source_path)
+                # Use Docling if available, otherwise standard loaders
+                if HAS_DOCLING:
+                    print("   ↳ Loading with Docling (Structure Aware)...")
+                    loader = DoclingLoader(source_path)
+                else:
+                    if source_path.startswith(('http://', 'https://')):
+                        print("   ↳ Loading with WebBaseLoader (Fallback)...")
+                        loader = WebBaseLoader(source_path)
+                    else:
+                        print("   ↳ Loading with PyPDFLoader (Fallback)...")
+                        loader = PyPDFLoader(source_path)
+
                 raw_docs = loader.load()
                 
-                # Split text naturally
                 text_splitter = RecursiveCharacterTextSplitter(
                     chunk_size=1000,
                     chunk_overlap=200,
@@ -64,7 +86,7 @@ class Iris:
                 docs = text_splitter.split_documents(raw_docs)
                 
             except Exception as e:
-                print(f"❌ Iris: Docling failed to load {source_path}. Error: {e}")
+                print(f"❌ Iris: Loader failed for {source_path}. Error: {e}")
                 return
 
         if docs:
@@ -78,18 +100,22 @@ class Iris:
         """Uses Llava to generate a text description of an image."""
         print("   ↳ Analyzing Image with Llava...")
         
-        with open(image_path, "rb") as image_file:
-            image_data = base64.b64encode(image_file.read()).decode("utf-8")
+        try:
+            with open(image_path, "rb") as image_file:
+                image_data = base64.b64encode(image_file.read()).decode("utf-8")
 
-        llava = ChatOllama(model="llava")
-        message = HumanMessage(
-            content=[
-                {"type": "text", "text": "Describe this image in detail. Extract any text visible."},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}},
-            ]
-        )
-        response = llava.invoke([message])
-        return f"Image Description for {os.path.basename(image_path)}:\n{response.content}"
+            llava = ChatOllama(model="llava")
+            message = HumanMessage(
+                content=[
+                    {"type": "text", "text": "Describe this image in detail. Extract any text visible."},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}},
+                ]
+            )
+            response = llava.invoke([message])
+            return f"Image Description for {os.path.basename(image_path)}:\n{response.content}"
+        except Exception as e:
+            print(f"❌ Iris: Vision analysis failed. {e}")
+            return "Image analysis failed."
 
     def _process_excel(self, file_path: str) -> List[Document]:
         """Converts Excel rows into semantic sentences for better RAG retrieval."""
@@ -102,12 +128,9 @@ class Iris:
             else:
                 df = pd.read_excel(file_path)
             
-            # Simple sanitization
             df = df.fillna("")
             
             for index, row in df.iterrows():
-                # Construct a sentence for each row
-                # e.g. "In row 5, the AccountNumber is 12345, the Status is Active..."
                 row_text = f"Record {index}: "
                 row_parts = []
                 for col in df.columns:
@@ -127,37 +150,54 @@ class Iris:
         return docs
 
     def get_context(self, query: str, n_results: int = 5) -> str:
-        """
-        Retrieves the most relevant context chunks for a given query.
-        
-        Returns:
-            A single string containing all retrieved context, separated by newlines.
-        """
+        """Retrieves the most relevant context chunks for a given query."""
         print(f"🔍 Iris: Searching memory for -> '{query}'")
         
-        results = self.vector_store.similarity_search(query, k=n_results)
-        
-        context_str = ""
-        for i, doc in enumerate(results):
-            source = doc.metadata.get("source", "unknown")
-            context_str += f"\n--- Context {i+1} (Source: {source}) ---\n{doc.page_content}\n"
-            
-        return context_str
+        try:
+            results = self.vector_store.similarity_search(query, k=n_results)
+            context_str = ""
+            for i, doc in enumerate(results):
+                source = doc.metadata.get("source", "unknown")
+                context_str += f"\n--- Context {i+1} (Source: {source}) ---\n{doc.page_content}\n"
+            return context_str
+        except Exception as e:
+            print(f"❌ Iris: Retrieval failed. {e}")
+            return ""
 
 # --- Verification Test Block ---
 if __name__ == "__main__":
-    print("--- Ayra Iris (RAG Engine) Verification ---")
-    
-    iris = Iris()
-    
-    # 1. Test Ingestion (Uncomment to test specific types)
-    # iris.rag_ingest("https://example.com") 
-    # iris.rag_ingest("test_document.pdf")
-    # iris.rag_ingest("financial_data.xlsx")
-    
-    # 2. Test Retrieval (Assumes data is already in ./ayra_storage from previous runs)
-    query = "What is the capital of France?" # Example query
-    context = iris.get_context(query)
-    
-    print("\n--- Retrieved Context ---")
-    print(context if context else "No relevant context found.")
+
+    # Check imports first
+    print(f"ℹ️ Docling Enabled: {HAS_DOCLING}")
+
+    iris = Iris(persist_directory="./test_ayra_storage")
+
+    # --- Test 1: URL ---
+    print("\n[TEST 1] Ingesting Web URL...")
+    iris.rag_ingest("https://en.wikipedia.org/wiki/Artificial_intelligence")
+
+    # --- Test 2: CSV ---
+    print("\n[TEST 2] Ingesting CSV...")
+    iris.rag_ingest("prompt_templates.csv")
+
+    # --- Test 3: PDF (Real) ---
+    print("\n[TEST 3] Ingesting Real PDF...")
+    pdf_path = "/Users/arkdos/Downloads/_OceanofPDF.com_The_Book_of_Money_How_to_feel_good_or_better_about_your_finances_-_Monzo.pdf"
+    if os.path.exists(pdf_path):
+        iris.rag_ingest(pdf_path)
+    else:
+        print(f"❌ PDF not found at: {pdf_path}")
+
+    # --- Test 4: Image ---
+    print("\n[TEST 4] Ingesting Image...")
+    iris.rag_ingest("wallpaperflare.com_wallpaper.jpg")
+
+    # --- Test 5: Retrieval ---
+    print("\n[TEST 5] Verifying Retrieval...")
+    context = iris.get_context("How can I feel better about my finances?", n_results=1)
+    if context:
+        print(f"   ✅ Context Found:\n{context.strip()[:200]}...")
+    else:
+        print("   ❌ No Context Found.")
+
+    print("\n✅ IRIS SYSTEM TEST COMPLETE.")
