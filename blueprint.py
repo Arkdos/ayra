@@ -10,7 +10,8 @@ from iris_out import Iris
 from starlink import Aether
 
 # --- LangChain & Ollama ---
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough, RunnableParallel
 from langchain_ollama import ChatOllama
@@ -43,10 +44,7 @@ class Assembly:
 
     # --- Station 1: Ignition ---
     def ignition(self, user_query: str, user_id: str = "default_user", mode: str = 'new') -> str:
-        """
-        Sets up the session and logs the initial user turn.
-        Mode can be: 'new', 'continue' (latest), or a specific Session UUID.
-        """
+        """Sets up the session and logs the initial user turn."""
         print(f"\n🔌 Station 1: Ignition (Mode: {mode})")
         self.active_user_id = user_id
         
@@ -58,7 +56,7 @@ class Assembly:
                 print("   ⚠️ No previous session found. Starting new.")
                 self.session_id = self.memory.new_session()
                 
-        elif mode != 'new':
+        elif mode != 'new' and mode is not None:
             self.session_id = mode
             print(f"   ↪️ Resuming Specific Session: {self.session_id}")
             
@@ -89,31 +87,58 @@ class Assembly:
         print(f"   ✅ Context Loaded ({len(self.raw_context)} chars)")
 
     # --- Internal Factory: Persona Config ---
-    def configure_persona(self, role_name: str, **kwargs) -> Tuple[str, ChatOllama]:
+    def configure_persona(self, role_name: str, model_override: str = None, **kwargs) -> Tuple[List[Any], ChatOllama]:
         """
-        Fetches persona from Soul and prepares the system prompt.
+        Fetches persona from Soul and prepares the full message history.
+        Allows explicit model override.
         """
+        # 1. Fetch Config
         persona_conf = self.soul.get_assistant(role_name)
-        model_name = persona_conf.get('model_preference', self.default_model)
         
+        # 2. Determine Model (Override > DB Preference > Default)
+        if model_override:
+            model_name = model_override
+        else:
+            model_name = persona_conf.get('model_preference', self.default_model)
+        
+        # 3. Build Base System Prompt (Persona + RAG Context)
         context_instruction = f"\n\nCONTEXT FROM IRIS:\n{self.raw_context}"
         
-        system_prompt = self.soul.build_persona_prompt(
+        system_text = self.soul.build_persona_prompt(
             role_name, 
             additional_instructions=context_instruction,
             **kwargs 
         )
         
+        # 4. Construct Message History
+        messages = [SystemMessage(content=system_text)]
+        
+        if self.session_id:
+            history = self.memory.get_session_history(self.session_id)
+            for msg in history:
+                content = msg.get('content', '')
+                sender = msg.get('sender')
+                if sender == 'AI':
+                    messages.append(AIMessage(content=content))
+                else:
+                    messages.append(HumanMessage(content=content))
+        
+        # 5. Init Model
+        print(f"     Creating LLM: {model_name} for role {role_name}")
         llm = ChatOllama(model=model_name, temperature=0.7)
         
+        # Update config to reflect the actual model used (for logging)
+        persona_conf['model_preference'] = model_name
         self.active_persona_config = persona_conf
-        return system_prompt, llm
+        
+        return messages, llm
 
     # --- Station 3: Fabricate Content ---
     async def fabricate_content(self, 
                                 scenario: str, 
                                 workflow: str = 'once', 
-                                roles: List[str] = None, 
+                                roles: List[str] = None,
+                                model_overrides: Dict[str, str] = None,
                                 kwargs: Dict[str, Any] = None):
         """
         The Core Engine. Runs the LLM chains based on the workflow type.
@@ -122,32 +147,36 @@ class Assembly:
         
         if not roles: roles = ["General"]
         if not kwargs: kwargs = {}
+        if not model_overrides: model_overrides = {}
 
         try:
             if workflow == 'once':
                 role = roles[0]
-                sys_prompt, llm = self.configure_persona(role, **kwargs)
+                model = model_overrides.get(role)
+                history_messages, llm = self.configure_persona(role, model_override=model, **kwargs.get(role, {}))
+                
                 print(f"   ↳ Running Single Chain with Role: {role}")
                 
-                prompt = ChatPromptTemplate.from_messages([("system", sys_prompt), ("human", "{input}")])
+                prompt = ChatPromptTemplate.from_messages(history_messages)
                 chain = prompt | llm | StrOutputParser()
-                self.final_content = await chain.ainvoke({"input": scenario})
+                self.final_content = await chain.ainvoke({})
 
             elif workflow == 'sequential':
                 print(f"   ↳ Running Sequential Chain: {roles}")
                 chain_history = ""
                 for i, role in enumerate(roles):
                     print(f"     ➜ Step {i+1}: {role}")
-                    sys_prompt, llm = self.configure_persona(role, **kwargs.get(role, {}))
                     
-                    if i == 0:
-                        step_input = scenario
-                    else:
-                        step_input = f"Original Request: {scenario}\n\nPrevious Output:\n{chain_history}\n\nTask: Build upon/refine this."
+                    model = model_overrides.get(role)
+                    history_messages, llm = self.configure_persona(role, model_override=model, **kwargs.get(role, {}))
                     
-                    prompt = ChatPromptTemplate.from_messages([("system", sys_prompt), ("human", "{input}")])
+                    if i > 0:
+                        history_messages.append(HumanMessage(content=f"Previous Agent Output:\n{chain_history}"))
+                    
+                    prompt = ChatPromptTemplate.from_messages(history_messages)
                     chain = prompt | llm | StrOutputParser()
-                    response = await chain.ainvoke({"input": step_input})
+                    
+                    response = await chain.ainvoke({})
                     chain_history = response 
                 self.final_content = chain_history
 
@@ -163,22 +192,25 @@ class Assembly:
                 
                 chains = {}
                 for role in debate_roles:
-                    sys_p, llm = self.configure_persona(role, **kwargs.get(role, {}))
-                    prompt = ChatPromptTemplate.from_messages([("system", sys_p), ("human", "{input}")])
+                    model = model_overrides.get(role)
+                    hist_msgs, llm = self.configure_persona(role, model_override=model, **kwargs.get(role, {}))
+                    prompt = ChatPromptTemplate.from_messages(hist_msgs)
                     chains[role] = (prompt | llm | StrOutputParser())
                 
                 map_chain = RunnableParallel(**chains)
-                debate_results = await map_chain.ainvoke({"input": scenario})
+                debate_results = await map_chain.ainvoke({})
                 
                 debate_transcript = "\n\n".join([f"--- {r.upper()} --- \n{content}" for r, content in debate_results.items()])
                 
                 print(f"     ➜ Synthesizing with {judge_role}...")
-                sys_prompt_judge, llm_judge = self.configure_persona(judge_role, **kwargs.get(judge_role, {}))
-                judge_input = f"Scenario: {scenario}\n\nArguments:\n{debate_transcript}\n\nTask: Synthesize."
                 
-                prompt_judge = ChatPromptTemplate.from_messages([("system", sys_prompt_judge), ("human", "{input}")])
+                model_j = model_overrides.get(judge_role)
+                judge_msgs, llm_judge = self.configure_persona(judge_role, model_override=model_j, **kwargs.get(judge_role, {}))
+                judge_msgs.append(HumanMessage(content=f"Arguments from Team:\n{debate_transcript}\n\nTask: Synthesize."))
+                
+                prompt_judge = ChatPromptTemplate.from_messages(judge_msgs)
                 chain_judge = prompt_judge | llm_judge | StrOutputParser()
-                self.final_content = await chain_judge.ainvoke({"input": judge_input})
+                self.final_content = await chain_judge.ainvoke({})
 
             # Log Final Turn
             assistant_name = self.active_persona_config.get('ai_name', 'Assembly')
@@ -208,10 +240,10 @@ class Assembly:
         if 'pdf' in outputs:
             tasks.append(self.aether.forge_pdf(self.final_content, f"mission_{self.session_id[:8]}.pdf"))
         if 'excel' in outputs:
-            dummy_data = [{"Session": self.session_id, "Content": self.final_content[:100]}]
+            dummy_data = [{"Session": self.session_id, "Content": self.final_content}]
             tasks.append(self.aether.forge_excel(dummy_data, f"mission_{self.session_id[:8]}.xlsx"))
         if 'voice' in outputs:
-            tasks.append(self.aether.broadcast(self.final_content[:500], save_file=f"brief_{self.session_id[:8]}.mp3")) 
+            tasks.append(self.aether.broadcast(self.final_content, save_file=f"brief_{self.session_id[:8]}.mp3"))
 
         if tasks:
             results = await asyncio.gather(*tasks)
@@ -221,9 +253,7 @@ class Assembly:
 
     # --- Extra: On-Demand Summary ---
     async def summarize_session(self):
-        """
-        Reads the full chat history of the current session and generates a concise summary.
-        """
+        """Reads the full chat history and generates a summary."""
         print(f"\n📝 Generating Session Summary for {self.session_id}...")
         
         history = self.memory.get_session_history(self.session_id)
@@ -233,10 +263,12 @@ class Assembly:
 
         transcript = "\n".join([f"{msg['sender']}: {msg['content']}" for msg in history])
         
-        sys_prompt, llm = self.configure_persona("Summarizer") 
+        # Manually using mistral for summary, could be parameterized too
+        llm = ChatOllama(model="mistral")
+        
         prompt = ChatPromptTemplate.from_messages([
-            ("system", sys_prompt),
-            ("human", "Summarize this conversation context:\n\n{input}")
+            ("system", "You are an expert summarizer."),
+            ("human", "Summarize the following conversation log:\n\n{input}")
         ])
         chain = prompt | llm | StrOutputParser()
         
@@ -252,7 +284,8 @@ class Assembly:
                                workflow: str = 'once', 
                                roles: List[str] = None, 
                                outputs: List[str] = None,
-                               session_mode: str = 'new', # 'new', 'continue', or UUID string
+                               session_mode: str = 'new', 
+                               model_overrides: Dict[str, str] = None, # NEW: Role -> Model Map
                                **persona_kwargs):
         """
         Runs the full assembly line.
@@ -260,46 +293,49 @@ class Assembly:
         if not roles: roles = ["General"]
         if not outputs: outputs = []
 
-        # 1. Ignition (with dynamic mode)
+        # 1. Ignition
         self.ignition(query, mode=session_mode)
         
         # 2. Ingest
         self.ingest_materials(query, source)
         
         # 3. Fabricate
-        await self.fabricate_content(query, workflow, roles, kwargs=persona_kwargs)
+        # Pass model_overrides down to the engine
+        await self.fabricate_content(query, workflow, roles, model_overrides=model_overrides, kwargs=persona_kwargs)
         
         # 4. Forge
         await self.forge_artifacts(outputs)
         
         return self.final_content
 
-def sample_sequential_process():
+# --- Verification Test Block ---
+if __name__ == "__main__":
     async def run_test_mission():
         orchestrator = Assembly()
-
-        print("\n🚀 STARTING COMPLEX SEQUENTIAL MISSION")
-
-        query = "Generate a simple multiplication problem for a 5th grader."
-
-        # Define the 3-step sequential workflow
-        roles = ["Math", "Story", "Professional Writer"]
-
-        # Define the desired output
-        outputs = ['word']
-
+        
+        print("\n🚀 STARTING MISSION WITH MODEL OVERRIDES")
+        
+        query = "Explain the theory of relativity like I am 5."
+        
+        # Define roles
+        roles = ["General", "Story"]
+        
+        # Define Overrides: Force 'General' to use 'gemma3' (instead of mistral)
+        # Force 'Story' to use 'llama3.2' (instead of mistral)
+        model_overrides = {
+            "General": "gemma3",
+            "Story": "llama3.2"
+        }
+        
         result = await orchestrator.execute_assembly(
             query=query,
             workflow='sequential',
             roles=roles,
-            outputs=outputs,
+            outputs=['word'],
+            model_overrides=model_overrides # Passing the map
         )
-
+        
         print("\n🏁 MISSION COMPLETE")
-        print(f"Final Output (from Professional Writer):\n{result}")
+        print(f"Final Output:\n{result[:300]}...")
 
     asyncio.run(run_test_mission())
-
-# --- Verification Test Block ---
-if __name__ == "__main__":
-    sample_sequential_process()

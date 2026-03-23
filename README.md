@@ -1,107 +1,121 @@
-# Ayra: Modular AI Orchestration Framework
+# Ayra AI Framework
 
-Ayra is a local-first, modular AI framework designed to orchestrate specialized LLM personas, RAG (Retrieval-Augmented Generation), and multi-modal outputs. It leverages **Ollama** for local inference and **LangChain** for complex workflows, optimized for Apple Silicon (M-series) performance.
+Ayra is a modular, local-first AI orchestration framework designed for Apple Silicon (M-series). It integrates memory, persona management, RAG (Retrieval Augmented Generation), and multi-modal output into a seamless "Assembly Line" architecture.
 
-## 🌟 Core Architecture
+It leverages **Ollama** for local inference and **LangChain** for complex agent workflows.
 
-The framework is built as an assembly line (`blueprint.py`) with distinct, specialized modules:
+## 🏗️ Core Architecture
 
-### 1. 🧠 Flashback (`lore.py`) - Memory
-- **Persistent Storage**: Uses SQLite (`ayra_memory.db`) to store session history, user profiles, and assistant configurations.
-- **Context Awareness**: Retrieves relevant history and user details to inject into prompts.
-- **CSV Sync**: Use `persona_rocket.py` to manage your AI assistants and templates via CSV files instead of code.
+The framework is composed of five distinct stations:
 
-### 2. 👻 Soul (`meat_box.py`) - Personas
-- **Persona Factory**: Dynamically constructs system prompts based on roles (e.g., "Math Tutor", "Financial Analyst", "NSFW Writer").
-- **Template Injection**: Automatically injects behavior modules (e.g., "Explicit Bypass", "Threaten Compliance") based on database flags.
-- **Runtime Overrides**: Allows on-the-fly adjustment of tone, strictness, and directives.
+1.  **🧠 Lore (Flashback)** (`lore.py`)
+    *   **Memory Core**: Manages `ayra_memory.db` (SQLite).
+    *   **Session State**: Tracks conversation history, user profiles, and chat summaries.
+    *   **Configuration**: Stores all Assistant definitions and Prompt Templates.
 
-### 3. 👁️ Iris (`iris_out.py`) - Vision & Ingestion (RAG)
-- **Multi-Source Ingestion**:
-  - **Web**: Scrapes and parses URLs using `Docling`.
-  - **PDF**: Intelligent structural parsing of documents.
-  - **Excel**: Converts rows into semantic sentences for better retrieval.
-  - **Images**: Uses **LLaVA** to generate text descriptions of visual content.
-- **Vector Memory**: Persists embeddings using `ChromaDB` and `nomic-embed-text`.
+2.  **👻 Soul (MeatBox)** (`meat_box.py`)
+    *   **Persona Factory**: Dynamically constructs system prompts based on roles (e.g., "Math Tutor", "Debater").
+    *   **Behavioral Injection**: Automatically injects flags like `NSFW`, `Explicit Filter Bypass`, or `Personification` based on database settings.
 
-### 4. 🛰️ Aether (`starlink.py`) - Output & Communication
-- **Artifact Forging**: Asynchronously generates high-quality **PDF**, **Word**, and **Excel** files.
-- **Signals**:
-  - **Voice**: Generates neural TTS audio via `edge-tts`.
-  - **Uplink**: Sends emails via SMTP.
+3.  **👁️ Iris** (`iris_out.py`)
+    *   **Ingestion Engine**: Scrapes and parses data from URLs, PDFs, Excel, and Images.
+    *   **Structure-Aware**: Uses `Docling` to preserve document layout and `Llava` for vision analysis.
+    *   **RAG Memory**: Persists embeddings in `ChromaDB` for long-term knowledge retrieval.
 
-### 5. 🏭 Assembly (`blueprint.py`) - Orchestration
-- **The Engine**: Ties all modules together into a cohesive pipeline: **Ignition -> Ingest -> Fabricate -> Forge**.
-- **Complex Workflows**:
-  - **Sequential**: Chain agents (e.g., Brainstorm -> Draft -> Edit).
-  - **Parallel**: Run agents simultaneously (e.g., Debate) and synthesize results (Judge).
+4.  **🛰️ Aether (Starlink)** (`starlink.py`)
+    *   **Artifact Forge**: Asynchronously generates high-quality artifacts:
+        *   📄 Word Documents (`.docx`)
+        *   📑 PDFs (`.pdf`)
+        *   📊 Excel Sheets (`.xlsx`)
+    *   **Signals**: Generates Neural TTS Audio (`.mp3`) and handles Email dispatch.
+
+5.  **🏭 Assembly** (`blueprint.py`)
+    *   **The Orchestrator**: Ties all modules together.
+    *   **Workflows**:
+        *   `once`: Single-shot query.
+        *   `sequential`: Multi-agent chain (e.g., Researcher -> Writer -> Editor).
+        *   `parallel`: Swarm execution (e.g., Advocate vs. Skeptic -> Judge).
 
 ## 🚀 Getting Started
 
-### Prerequisites
-- Python 3.10+
-- [Ollama](https://ollama.com) installed and running.
-- Required Models: `mistral`, `llama3.2`, `gemma3`, `qwen2.5`, `llava`, `nomic-embed-text`.
-
-### Installation
-
-1.  **Clone the Repository**:
+### 1. Prerequisites
+*   Python 3.10+
+*   **Ollama** running locally.
+*   **Models**: Pull the following models:
     ```bash
-    git clone https://github.com/yourusername/ayra.git
-    cd ayra
+    ollama pull mistral
+    ollama pull llama3.2
+    ollama pull gemma3
+    ollama pull qwen2.5
+    ollama pull llava
+    ollama pull nomic-embed-text
     ```
 
-2.  **Install Dependencies**:
-    ```bash
-    pip install langchain langchain-community langchain-ollama langchain-chroma langchain-docling 
-    pip install pandas openpyxl python-docx fpdf2 aiosmtplib edge-tts pillow reportlab
-    ```
+### 2. Installation
+Clone the repo and install dependencies:
+```bash
+pip install langchain langchain-community langchain-ollama langchain-chroma langchain-docling langchain-text-splitters
+pip install pandas openpyxl python-docx fpdf2 aiosmtplib edge-tts pillow reportlab
+```
 
-3.  **Initialize Database**:
-    Run the rocket to populate your local database with default personas and templates.
-    ```bash
-    python3 persona_rocket.py bootstrap
-    ```
+### 3. Bootstrap the System
+Initialize the database and generate the configuration CSVs. **Run this once.**
+```bash
+python3 persona_rocket.py bootstrap
+```
+This creates `ayra_memory.db`, `ai_assistants.csv`, and `prompt_templates.csv`.
 
-### Usage Examples
+## 🛠️ Configuration & Management
 
-#### 1. Generate a Quiz from a URL (`kinetic.py`)
+**Do not edit code to change personas.**
+*   Open **`ai_assistants.csv`** to add new roles, change prompts, or adjust default kwargs.
+*   Open **`prompt_templates.csv`** to edit reusable blocks (like NSFW filters).
+*   Run `python3 persona_rocket.py` to **sync** your CSV changes to the database.
+
+## 💡 Usage Examples
+
+### Run a Complex Mission (`blueprint.py`)
+Use the `Assembly` class to run a multi-step mission with model overrides.
+
+```python
+import asyncio
+from blueprint import Assembly
+
+async def main():
+    orchestrator = Assembly()
+    
+    # Run a Sequential Chain
+    result = await orchestrator.execute_assembly(
+        query="Explain Quantum Computing to a 5-year old.",
+        workflow='sequential',
+        roles=["General", "Story"], 
+        outputs=['word', 'voice'], # Generate Doc & Audio
+        model_overrides={"Story": "gemma3"} # Force specific model
+    )
+    print(result)
+
+asyncio.run(main())
+```
+
+### Generate Content from URL (`kinetic.py`)
+Quickly scrape a website and generate a quiz or report.
+
 ```python
 from kinetic import generate_quiz_from_url
 import asyncio
 
-# Generates a PDF quiz about Quantum Computing
-asyncio.run(generate_quiz_from_url("https://en.wikipedia.org/wiki/Quantum_computing", grade=8))
+asyncio.run(generate_quiz_from_url(
+    url="https://en.wikipedia.org/wiki/Artificial_intelligence", 
+    grade=8, 
+    num_questions=5
+))
 ```
 
-#### 2. Run a Complex Debate (`blueprint.py`)
-```python
-from blueprint import Assembly
-import asyncio
+## 🔄 Session Management
 
-async def run_debate():
-    orchestrator = Assembly()
-    await orchestrator.execute_assembly(
-        query="Is AI sentience possible?",
-        workflow='parallel',
-        roles=["Propaganda", "Critique", "General"], # Advocate, Skeptic, Judge
-        outputs=['word']
-    )
+Ayra supports continuous conversations.
+*   **New Session**: `session_mode='new'`
+*   **Resume Latest**: `session_mode='continue'`
+*   **Resume Specific**: Pass the UUID string.
 
-asyncio.run(run_debate())
-```
-
-## 📂 File Structure
-
-- `ayra_memory.db`: SQLite database storing all state.
-- `ai_assistants.csv`: Editable source of truth for AI personas.
-- `prompt_templates.csv`: Editable source for reusable prompt blocks.
-- `mission_artifacts/`: Directory where generated PDFs, Docs, and Audio are saved.
-
-## 🛠️ Customization
-
-To add a new AI persona, simply edit **`ai_assistants.csv`** and add a new row. Then run:
-```bash
-python3 persona_rocket.py
-```
-This will sync your CSV changes to the database, making the new persona immediately available to the Assembly line.
+The system automatically injects previous chat history and summaries into the LLM context.
