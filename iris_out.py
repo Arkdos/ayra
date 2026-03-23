@@ -1,11 +1,10 @@
 import os
 import pandas as pd
+import shutil
 import base64
-import sys
 from typing import List, Union
 
-
-# --- LangChain Imports (Defensive Loading) ---
+# --- Imports ---
 try:
     from langchain_chroma import Chroma
     from langchain_ollama import OllamaEmbeddings, ChatOllama
@@ -13,19 +12,19 @@ try:
     from langchain_core.messages import HumanMessage
     from langchain_text_splitters import RecursiveCharacterTextSplitter
     from langchain_community.document_loaders import WebBaseLoader, PyPDFLoader
-    from langchain_community.vectorstores.utils import filter_complex_metadata
 except ImportError as e:
-    print(f"❌ CRITICAL ERROR: Missing or incompatible LangChain packages.\n   Error: {e}")
-    print("   Please run: pip install -U langchain-core langchain-ollama langchain-community langchain-chroma langchain-text-splitters")
+    print(f"❌ CRITICAL ERROR: Missing LangChain packages.\nError: {e}")
     sys.exit(1)
 
-# Try importing Docling, fall back if missing/broken
+# Try importing Docling
 try:
     from langchain_docling import DoclingLoader
     HAS_DOCLING = True
 except ImportError:
-    print("⚠️ DoclingLoader not found or incompatible. Will fall back to standard loaders.")
     HAS_DOCLING = False
+
+# --- Helper Imports for Testing ---
+from PIL import Image, ImageDraw
 
 class Iris:
     """
@@ -44,6 +43,50 @@ class Iris:
             embedding_function=self.embedding_model,
             persist_directory=self.persist_directory
         )
+
+    def clear_memory(self):
+        """
+        Wipes the persistent vector storage to ensure a clean slate for new context.
+        """
+        print(f"🧹 Iris: Clearing memory at {self.persist_directory}...")
+        try:
+            self.vector_store.delete_collection()
+            print("   ✅ Chroma Collection Deleted.")
+        except Exception as e:
+            print(f"   ⚠️ Could not delete collection (might be empty): {e}")
+
+        # Re-initialize
+        self.vector_store = Chroma(
+            collection_name="ayra_knowledge",
+            embedding_function=self.embedding_model,
+            persist_directory=self.persist_directory
+        )
+        print("   ✅ Memory Re-initialized.")
+
+    def _sanitize_metadata(self, docs: List[Document]) -> List[Document]:
+        """
+        Cleans document metadata to ensure compatibility with ChromaDB.
+        Chroma only accepts str, int, float, bool. Complex types (dicts, lists) cause errors.
+        """
+        print("   ↳ Sanitizing metadata for ChromaDB compatibility...")
+        for doc in docs:
+            new_metadata = {}
+            for key, value in doc.metadata.items():
+                if isinstance(value, (str, int, float, bool)):
+                    new_metadata[key] = value
+                elif value is None:
+                    continue # Skip None values
+                else:
+                    # For lists/dicts, we convert them to string representation
+                    # or skip them if they are too complex/unnecessary.
+                    # Docling often adds 'doc_items' which is a list of dicts.
+                    if key in ['doc_items', 'origin', 'headings']:
+                        continue # Skip specific complex Docling fields
+                    else:
+                        new_metadata[key] = str(value) # Fallback: convert to string
+            
+            doc.metadata = new_metadata
+        return docs
 
     def rag_ingest(self, source_path: str):
         """
@@ -65,7 +108,6 @@ class Iris:
         # 3. URL & PDF Handling
         else:
             try:
-                # Use Docling if available, otherwise standard loaders
                 if HAS_DOCLING:
                     print("   ↳ Loading with Docling (Structure Aware)...")
                     loader = DoclingLoader(source_path)
@@ -91,15 +133,11 @@ class Iris:
                 return
 
         if docs:
+            # SANITIZE before storing
+            docs = self._sanitize_metadata(docs)
+            
             print(f"   ↳ Storing {len(docs)} chunks into Ayra Memory...")
-
-            # --- ADD THIS LINE HERE ---
-            # This strips the nested dictionaries that Docling creates
-            # so ChromaDB can handle the metadata.
-            clean_docs = filter_complex_metadata(docs)
-
-            self.vector_store.add_documents(clean_docs)
-
+            self.vector_store.add_documents(docs)
             print("✅ Iris: Ingestion Complete.")
         else:
             print("⚠️ Iris: No content extracted.")
@@ -107,7 +145,6 @@ class Iris:
     def _process_image(self, image_path: str) -> str:
         """Uses Llava to generate a text description of an image."""
         print("   ↳ Analyzing Image with Llava...")
-        
         try:
             with open(image_path, "rb") as image_file:
                 image_data = base64.b64encode(image_file.read()).decode("utf-8")
@@ -129,7 +166,6 @@ class Iris:
         """Converts Excel rows into semantic sentences for better RAG retrieval."""
         print("   ↳ Converting Excel to Semantic Text...")
         docs = []
-        
         try:
             if file_path.endswith('.csv'):
                 df = pd.read_csv(file_path)
@@ -151,16 +187,14 @@ class Iris:
                     page_content=row_text, 
                     metadata={"source": file_path, "row": index}
                 ))
-                
         except Exception as e:
             print(f"❌ Iris: Excel processing error: {e}")
             
         return docs
 
-    def get_context(self, query: str, n_results: int = 25) -> str:
+    def get_context(self, query: str, n_results: int = 70) -> str:
         """Retrieves the most relevant context chunks for a given query."""
         print(f"🔍 Iris: Searching memory for -> '{query}'")
-
         try:
             results = self.vector_store.similarity_search(query, k=n_results)
             context_str = ""
@@ -172,43 +206,48 @@ class Iris:
             print(f"❌ Iris: Retrieval failed. {e}")
             return ""
 
-def test():
+# --- Verification Test Block ---
+if __name__ == "__main__":
+    def create_dummy_files():
+        print("🛠️ Creating dummy test files...")
+        data = {"Project": ["Alpha", "Beta"], "Budget": [10000, 25000]}
+        df = pd.DataFrame(data)
+        df.to_csv("test_financials.csv", index=False)
+        print("   ✅ Created 'test_financials.csv'")
 
-    # Check imports first
-    print(f"ℹ️ Docling Enabled: {HAS_DOCLING}")
+        img = Image.new('RGB', (400, 200), color=(73, 109, 137))
+        d = ImageDraw.Draw(img)
+        d.text((10, 10), "Project Omega", fill=(255, 255, 0))
+        img.save('test_image.png')
+        print("   ✅ Created 'test_image.png'")
 
+    def cleanup_files():
+        files = ["test_financials.csv", "test_image.png"]
+        for f in files:
+            if os.path.exists(f): os.remove(f)
+        print("\n🧹 Cleaned up temporary test files.")
+
+    print("\n🚀 STARTING IRIS SYSTEM TEST 🚀\n" + "="*40)
+    
     iris = Iris(persist_directory="./test_ayra_storage")
+    iris.clear_memory()
+    create_dummy_files()
 
-    # --- Test 1: URL ---
     print("\n[TEST 1] Ingesting Web URL...")
     iris.rag_ingest("https://en.wikipedia.org/wiki/Artificial_intelligence")
 
-    # --- Test 2: CSV ---
     print("\n[TEST 2] Ingesting CSV...")
-    iris.rag_ingest("prompt_templates.csv")
+    iris.rag_ingest("test_financials.csv")
 
-    # --- Test 3: PDF (Real) ---
-    print("\n[TEST 3] Ingesting Real PDF...")
-    pdf_path = "/Users/arkdos/Downloads/_OceanofPDF.com_The_Book_of_Money_How_to_feel_good_or_better_about_your_finances_-_Monzo.pdf"
-    if os.path.exists(pdf_path):
-        iris.rag_ingest(pdf_path)
-    else:
-        print(f"❌ PDF not found at: {pdf_path}")
+    print("\n[TEST 3] Ingesting Image...")
+    iris.rag_ingest("test_image.png")
 
-    # --- Test 4: Image ---
-    print("\n[TEST 4] Ingesting Image...")
-    iris.rag_ingest("wallpaperflare.com_wallpaper.jpg")
-
-    # --- Test 5: Retrieval ---
-    print("\n[TEST 5] Verifying Retrieval...")
+    print("\n[TEST 4] Verifying Retrieval...")
     context = iris.get_context("How can I feel better about my finances?", n_results=1)
     if context:
-        print(f"   ✅ Context Found:\n{context.strip()}")
+        print(f"   ✅ Context Found:\n{context.strip()[:200]}...")
     else:
         print("   ❌ No Context Found.")
 
+    cleanup_files()
     print("\n✅ IRIS SYSTEM TEST COMPLETE.")
-
-# --- Verification Test Block ---
-if __name__ == "__main__":
-    test()
