@@ -18,16 +18,8 @@ async def generate_quiz_from_url(url: str, grade: int = 5, num_questions: int = 
         print(f"   ↪️ Resuming Session: {session_id}")
     
     # Define the Mission
-    query = f"Create a comprehensive reading comprehension multiple choice quiz based on the provided context."
-    
-    # Configure the 'Teaching' persona
-    persona_kwargs = {
-        "Teaching": {
-            "grade": grade,
-            "question_num": num_questions
-        }
-    }
-    
+    query = f"Create a comprehensive reading comprehension multiple choice quiz with {num_questions} questions based on the provided context."
+
     # Determine mode
     mode = session_id if session_id else 'new'
     
@@ -35,11 +27,10 @@ async def generate_quiz_from_url(url: str, grade: int = 5, num_questions: int = 
     result = await orchestrator.execute_assembly(
         query=query,
         source=url,
-        workflow='once',
-        roles=["Teaching"],
+        workflow='sequential',
+        roles=["Comp Scraper", "Comp Questioner", "Comp Auditor"],
         outputs=['word'],
-        session_mode=mode, 
-        **persona_kwargs
+        session_mode=mode,
     )
     
     print("\n✅ KINETIC: Quiz Generation Complete.")
@@ -85,4 +76,4 @@ def generate_url_quiz():
 
 
 if __name__ == "__main__":
-    run_chatbot()
+    generate_url_quiz()
