@@ -67,7 +67,7 @@ class Flashback(object):
             """)
 
             # 4. AI Assistants Table
-            # Note: Using PLURAL 'default_kwargs' per user instruction
+            # Added: temperature (FLOAT) column
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ai_assistants (
                     assistant_name TEXT PRIMARY KEY,
@@ -86,7 +86,8 @@ class Flashback(object):
                     relationship TEXT,
                     word_limit INTEGER,
                     threaten BOOLEAN,
-                    default_kwargs TEXT 
+                    default_kwargs TEXT,
+                    temperature FLOAT 
                 )
             """)
             
@@ -263,7 +264,6 @@ class Flashback(object):
             return
 
         # Prepare JSON fields
-        # CRITICAL FIX: Ensure 'default_kwargs' matches the key passed from persona_rocket.py
         for field in ['specialized_skills', 'default_kwargs']: 
             if field in kwargs and isinstance(kwargs[field], (dict, list)):
                 kwargs[field] = json.dumps(kwargs[field])
@@ -273,14 +273,12 @@ class Flashback(object):
             'assistant_name', 'ai_name', 'model_preference', 'system_prompt_template', 
             'human_prompt_template', 'description', 'tone', 'specialized_skills',
             'language', 'explicit_filter', 'nsfw', 'personify', 'user_name', 
-            'relationship', 'word_limit', 'threaten', 'default_kwargs'
+            'relationship', 'word_limit', 'threaten', 'default_kwargs',
+            'temperature' # Added temperature to upsert logic
         ]
         
-        # DEBUG: Print what we are trying to insert for defaults
-        # if 'default_kwargs' in kwargs:
-        #     print(f"DEBUG Upsert {kwargs['assistant_name']}: default_kwargs={kwargs['default_kwargs']}")
-        
         values = [kwargs.get(col) for col in columns]
+        
         with self._get_connection() as conn:
             cursor = conn.cursor()
             placeholders = ",".join(["?"] * len(columns))
@@ -307,7 +305,7 @@ class Flashback(object):
                 result = dict(zip(col_names, row))
                 
                 # Parse JSON fields
-                for field in ['specialized_skills', 'default_kwargs']: # Using PLURAL
+                for field in ['specialized_skills', 'default_kwargs']:
                     if result.get(field):
                         try:
                             result[field] = json.loads(result[field])
@@ -433,10 +431,12 @@ if __name__ == "__main__":
         ai_name="Tester",
         model_preference="mistral",
         system_prompt_template="Hello {name}",
-        default_kwargs={"name": "Friend"} # Using PLURAL
+        default_kwargs={"name": "Friend"},
+        temperature=0.9 # Testing new temp field
     )
     
     config = fb.get_assistant_config("TestBot")
     if config:
-        print(f"Retrieved Default Kwargs: {config['default_kwargs']}") # Using PLURAL
+        print(f"Retrieved Default Kwargs: {config['default_kwargs']}") 
+        print(f"Retrieved Temperature: {config['temperature']}")
         print("✅ DB Schema Update Verified.")

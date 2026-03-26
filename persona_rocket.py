@@ -12,6 +12,7 @@ def launch_rocket(fb):
     # 1. Sync Assistants
     assistants_csv = "ai_assistants.csv"
     if os.path.exists(assistants_csv):
+        # This will dynamically read headers (including 'temperature' and 'default_kwargs')
         fb.import_csv_to_table("ai_assistants", assistants_csv, pk_column="assistant_name")
     else:
         print(f"   ⚠️ '{assistants_csv}' not found. Cannot sync assistants.")
@@ -35,21 +36,18 @@ def export_rocket(fb):
     fb.export_table_to_csv("prompt_templates", "prompt_templates.csv")
     print("   ✅ Export Complete.")
 
-def upload_csv_to_db():
+if __name__ == "__main__":
     db_path = "ayra_memory.db"
     fb_instance = Flashback(db_path)
-
+    
+    # Simple CLI: 'export' to dump DB, otherwise default to Sync (Import)
     if len(sys.argv) > 1 and sys.argv[1].lower() == "export":
         export_rocket(fb_instance)
     else:
-        # Standard workflow: Sync from CSV, then Export to keep consistent
-        if not os.path.exists("ai_assistants.csv") or not os.path.exists("prompt_templates.csv"):
-            print(
-                "❌ CSV files not found. Please ensure 'ai_assistants.csv' and 'prompt_templates.csv' are in the directory.")
+        # Check if CSVs exist before trying to sync
+        if not os.path.exists("ai_assistants.csv"):
+            print("❌ Error: 'ai_assistants.csv' not found. Please place your spreadsheet in this folder.")
         else:
             launch_rocket(fb_instance)
-            export_rocket(fb_instance)
-
-
-if __name__ == "__main__":
-   upload_csv_to_db()
+            # Optional: Export back to ensure formatting consistency?
+            # export_rocket(fb_instance)

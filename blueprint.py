@@ -34,6 +34,7 @@ class Assembly:
         self.aether = Aether()
         
         self.default_model = "mistral" 
+        self.default_temp = 0.7
         
         # State (The Conveyor Belt)
         self.session_id: str = None
@@ -100,6 +101,10 @@ class Assembly:
             model_name = model_override
         else:
             model_name = persona_conf.get('model_preference', self.default_model)
+            
+        # Get Temperature from Persona (default to self.default_temp if missing)
+        temperature = persona_conf.get('temperature', self.default_temp)
+        if temperature is None: temperature = self.default_temp
         
         context_instruction = f"\n\nCONTEXT FROM IRIS:\n{self.raw_context}"
         
@@ -121,8 +126,8 @@ class Assembly:
                 else:
                     messages.append(HumanMessage(content=content))
         
-        print(f"     Creating LLM: {model_name} for role {role_name}")
-        llm = ChatOllama(model=model_name, temperature=0.7)
+        print(f"     Creating LLM: {model_name} (Temp: {temperature}) for role {role_name}")
+        llm = ChatOllama(model=model_name, temperature=temperature)
         
         persona_conf['model_preference'] = model_name
         self.active_persona_config = persona_conf
@@ -138,7 +143,6 @@ class Assembly:
                                 kwargs: Dict[str, Any] = None):
         """
         The Core Engine. Runs LLM chains based on the workflow type.
-        Fully dynamic: supports any number of roles in sequential or parallel.
         """
         print(f"\n⚙️ Station 3: Fabricate Content (Workflow: {workflow})")
         
@@ -148,11 +152,10 @@ class Assembly:
 
         try:
             if workflow == 'once':
-                # --- Workflow: Single Shot ---
                 role = roles[0]
                 model = model_overrides.get(role)
                 history_messages, llm = self.configure_persona(role, model_override=model, **kwargs.get(role, {}))
-                
+
                 print(f"   ↳ Running Single Chain with Role: {role}")
                 
                 prompt = ChatPromptTemplate.from_messages(history_messages)
@@ -160,9 +163,6 @@ class Assembly:
                 self.final_content = await chain.ainvoke({})
 
             elif workflow == 'sequential':
-                # --- Workflow: Dynamic Sequential Chain ---
-                # A -> B -> C -> D ... -> N
-                # Each step receives the output of the previous step as context.
                 print(f"   ↳ Running Sequential Chain with {len(roles)} Steps: {roles}")
                 
                 chain_history = ""
@@ -174,7 +174,6 @@ class Assembly:
                     history_messages, llm = self.configure_persona(role, model_override=model, **kwargs.get(role, {}))
                     
                     if i > 0:
-                        # Append the previous step's output as explicit context for the next agent
                         context_msg = f"Output from previous agent ({roles[i-1]}):\n{chain_history}\n\nTask: Continue, refine, or critique based on this."
                         history_messages.append(HumanMessage(content=context_msg))
                     
@@ -187,20 +186,16 @@ class Assembly:
                 self.final_content = chain_history
 
             elif workflow == 'parallel':
-                # --- Workflow: Dynamic Parallel Swarm ---
-                # Roles [A, B, C, D] -> [A, B, C] run in parallel -> D synthesizes.
-                # Requires at least 2 roles.
                 if len(roles) < 2:
                     print("⚠️ Parallel workflow requires at least 2 roles.")
                     return
 
-                judge_role = roles[-1]        # The last role is always the synthesizer
-                swarm_roles = roles[:-1]      # All previous roles are the swarm
+                judge_role = roles[-1]
+                swarm_roles = roles[:-1]
                 
                 print(f"   ↳ Running Parallel Swarm with {len(swarm_roles)} Agents: {swarm_roles}")
                 print(f"   ↳ Synthesizer/Judge: {judge_role}")
                 
-                # 1. Create Parallel Chains for the Swarm
                 chains = {}
                 for role in swarm_roles:
                     model = model_overrides.get(role)
@@ -208,20 +203,16 @@ class Assembly:
                     prompt = ChatPromptTemplate.from_messages(hist_msgs)
                     chains[role] = (prompt | llm | StrOutputParser())
                 
-                # 2. Run Swarm
                 map_chain = RunnableParallel(**chains)
                 swarm_results = await map_chain.ainvoke({})
                 
-                # 3. Format Output
                 debate_transcript = "\n\n".join([f"--- {r.upper()} OUTPUT ---\n{content}" for r, content in swarm_results.items()])
                 
-                # 4. Run Judge
                 print(f"     ➜ Synthesizing with {judge_role}...")
                 
                 model_j = model_overrides.get(judge_role)
                 judge_msgs, llm_judge = self.configure_persona(judge_role, model_override=model_j, **kwargs.get(judge_role, {}))
                 
-                # Judge sees the swarm's collective output
                 judge_msgs.append(HumanMessage(content=f"Collective Output from Team:\n{debate_transcript}\n\nTask: Synthesize and conclude."))
                 
                 prompt_judge = ChatPromptTemplate.from_messages(judge_msgs)
@@ -327,36 +318,25 @@ if __name__ == "__main__":
     async def run_test_mission():
         orchestrator = Assembly()
         
-        print("\n🚀 STARTING MASSIVE PARALLEL MISSION")
+        print("\n🚀 STARTING MISSION WITH MODEL OVERRIDES")
         
-        query = "Discuss the pros and cons of Space Colonization."
+        query = "Explain the theory of relativity like I am 5."
         
-        # Scenario: 4-Way Debate + 1 Judge (5 Roles Total)
-        # We can reuse roles or define new ones in DB.
-        # Here we reuse available roles to simulate different perspectives.
-        roles = [
-            "Propaganda",   # The Advocate (Pro)
-            "Critique",     # The Skeptic (Con)
-            "Financial Advisor", # The Economist (Cost)
-            "Story",        # The Visionary (Dream)
-            "General"       # The Judge (Synthesis) - LAST ROLE is ALWAYS JUDGE
-        ]
+        # Define roles
+        roles = ["General", "Story"]
         
-        # Override models to speed up the swarm (using smaller models for swarm, big for judge)
-        overrides = {
-            "Propaganda": "mistral",
-            "Critique": "mistral",
-            "Financial Advisor": "mistral",
-            "Story": "mistral",
-            "General": "llama3.2" # Judge
+        # Define Overrides
+        model_overrides = {
+            "General": "gemma3",
+            "Story": "llama3.2"
         }
         
         result = await orchestrator.execute_assembly(
             query=query,
-            workflow='parallel',
+            workflow='sequential',
             roles=roles,
             outputs=['word'],
-            model_overrides=overrides
+            model_overrides=model_overrides
         )
         
         print("\n🏁 MISSION COMPLETE")
