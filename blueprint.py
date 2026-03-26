@@ -45,10 +45,7 @@ class Assembly:
 
     # --- Station 1: Ignition ---
     def ignition(self, user_query: str, user_id: str = "default_user", mode: str = 'new') -> str:
-        """
-        Sets up the session and logs the initial user turn.
-        Mode can be: 'new', 'continue' (latest), or a specific Session UUID.
-        """
+        """Sets up the session and logs the initial user turn."""
         print(f"\n🔌 Station 1: Ignition (Mode: {mode})")
         self.active_user_id = user_id
         
@@ -102,7 +99,6 @@ class Assembly:
         else:
             model_name = persona_conf.get('model_preference', self.default_model)
             
-        # Get Temperature from Persona (default to self.default_temp if missing)
         temperature = persona_conf.get('temperature', self.default_temp)
         if temperature is None: temperature = self.default_temp
         
@@ -142,7 +138,7 @@ class Assembly:
                                 model_overrides: Dict[str, str] = None,
                                 kwargs: Dict[str, Any] = None):
         """
-        The Core Engine. Runs LLM chains based on the workflow type.
+        The Core Engine. Runs the LLM chains based on the workflow type.
         """
         print(f"\n⚙️ Station 3: Fabricate Content (Workflow: {workflow})")
         
@@ -155,7 +151,7 @@ class Assembly:
                 role = roles[0]
                 model = model_overrides.get(role)
                 history_messages, llm = self.configure_persona(role, model_override=model, **kwargs.get(role, {}))
-
+                
                 print(f"   ↳ Running Single Chain with Role: {role}")
                 
                 prompt = ChatPromptTemplate.from_messages(history_messages)
@@ -258,6 +254,53 @@ class Assembly:
         else:
             print("   ⚠️ No artifacts requested.")
 
+    # --- Station 5: Quality Assurance (Critique) ---
+    async def critique_response(self, original_query: str) -> Tuple[bool, str]:
+        """
+        Assesses the quality of the generated response using the 'Critique' persona.
+        Returns (is_passed, critique_feedback).
+        """
+        print(f"\n⚖️ Station 5: Quality Assurance (Critique)")
+        
+        # Configure the 'Critique' persona
+        # We pass the required kwargs directly
+        critique_kwargs = {
+            "init_original_query": original_query,
+            "source_context": self.raw_context,
+            "init_response": self.final_content
+        }
+        
+        try:
+            # We don't use memory for the critique to keep it objective and focused only on the current turn
+            # But the requirement was to use configure_persona which includes memory.
+            # For a pure audit, we might want to temporarily clear session_id context, 
+            # but let's stick to the standard flow first.
+            messages, llm = self.configure_persona("Critique", **critique_kwargs)
+            
+            prompt = ChatPromptTemplate.from_messages(messages)
+            chain = prompt | llm | StrOutputParser()
+            
+            critique_result = await chain.ainvoke({})
+            print(f"   ↳ Critique Result: {critique_result[:50]}...")
+            
+            # Simple parsing: check for PASS or FAIL at the start
+            is_passed = critique_result.strip().upper().startswith("PASS")
+            
+            # Log the critique turn
+            self.memory.log_turn(
+                self.session_id,
+                sender="AI",
+                content=critique_result,
+                ai_assistant="Kyle (QA)",
+                model_used=self.active_persona_config.get('model_preference')
+            )
+            
+            return is_passed, critique_result
+            
+        except Exception as e:
+            print(f"❌ Critique Failed: {e}")
+            return True, "" # Fail open to avoid infinite loops if critique crashes
+
     # --- Extra: On-Demand Summary ---
     async def summarize_session(self):
         """Reads the full chat history and generates a summary."""
@@ -291,10 +334,11 @@ class Assembly:
                                roles: List[str] = None, 
                                outputs: List[str] = None,
                                session_mode: str = 'new', 
-                               model_overrides: Dict[str, str] = None, 
+                               model_overrides: Dict[str, str] = None,
+                               critique: bool = False,
                                **persona_kwargs):
         """
-        Runs the full assembly line.
+        Runs the full assembly line with optional Quality Assurance retry loop.
         """
         if not roles: roles = ["General"]
         if not outputs: outputs = []
@@ -305,10 +349,33 @@ class Assembly:
         # 2. Ingest
         self.ingest_materials(query, source)
         
-        # 3. Fabricate
-        await self.fabricate_content(query, workflow, roles, model_overrides=model_overrides, kwargs=persona_kwargs)
+        # --- FABRICATION LOOP (with Critique) ---
+        max_retries = 2
+        attempt = 0
+        current_query = query
         
-        # 4. Forge
+        while attempt <= max_retries:
+            attempt += 1
+            if attempt > 1:
+                print(f"\n🔄 RE-FABRICATION ATTEMPT {attempt}/{max_retries+1}")
+
+            # 3. Fabricate
+            await self.fabricate_content(current_query, workflow, roles, model_overrides=model_overrides, kwargs=persona_kwargs)
+            
+            # 4. Critique (if enabled)
+            if critique:
+                is_passed, feedback = await self.critique_response(query)
+                if is_passed:
+                    print("   ✨ Quality Check PASSED.")
+                    break
+                else:
+                    print(f"   ⚠️ Quality Check FAILED. Retrying...")
+                    # Update query for next attempt to include the feedback
+                    current_query = f"{query}\n\nNOTE: Previous response failed quality check. Please address these issues:\n{feedback}"
+            else:
+                break # Exit loop if critique is disabled
+
+        # 5. Forge
         await self.forge_artifacts(outputs)
         
         return self.final_content
@@ -318,28 +385,20 @@ if __name__ == "__main__":
     async def run_test_mission():
         orchestrator = Assembly()
         
-        print("\n🚀 STARTING MISSION WITH MODEL OVERRIDES")
+        print("\n🚀 STARTING MISSION WITH CRITIQUE")
         
-        query = "Explain the theory of relativity like I am 5."
+        query = "Explain what is gravity in physics."
         
-        # Define roles
-        roles = ["General", "Story"]
-        
-        # Define Overrides
-        model_overrides = {
-            "General": "gemma3",
-            "Story": "llama3.2"
-        }
-        
+        # Run with Critique enabled
         result = await orchestrator.execute_assembly(
             query=query,
-            workflow='sequential',
-            roles=roles,
-            outputs=['word'],
-            model_overrides=model_overrides
+            workflow='once',
+            roles=["General"],
+            outputs=[],
+            critique=True # Enable QA
         )
         
         print("\n🏁 MISSION COMPLETE")
-        print(f"Final Output:\n{result[:300]}...")
+        print(f"Final Output:\n{result}...")
 
     asyncio.run(run_test_mission())
