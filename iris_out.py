@@ -4,6 +4,7 @@ import shutil
 import base64
 from typing import List, Union
 import sys
+import warnings
 
 
 # --- Imports ---
@@ -28,6 +29,7 @@ except ImportError:
 # --- Helper Imports for Testing ---
 from PIL import Image, ImageDraw
 
+
 class Iris:
     """
     Iris: The Vision & Knowledge Ingestion Engine for Ayra.
@@ -45,6 +47,7 @@ class Iris:
             embedding_function=self.embedding_model,
             persist_directory=self.persist_directory
         )
+        warnings.filterwarnings('ignore')  # Ignores all warnings
 
     def clear_memory(self):
         """

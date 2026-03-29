@@ -1,121 +1,102 @@
-# Ayra AI Framework
+# Ayra: The JIT AI Assembly Line 🏭
 
-Ayra is a modular, local-first AI orchestration framework designed for Apple Silicon (M-series). It integrates memory, persona management, RAG (Retrieval Augmented Generation), and multi-modal output into a seamless "Assembly Line" architecture.
+Ayra is a local-first, modular AI orchestration framework optimized for Apple Silicon (M-series). It transforms raw data into high-fidelity artifacts through a sophisticated, multi-station pipeline.
 
-It leverages **Ollama** for local inference and **LangChain** for complex agent workflows.
+## 🏗️ Core Module Capabilities
 
-## 🏗️ Core Architecture
+### 🧠 Lore (`lore.py`)
+**The Memory Core.** Manages `ayra_memory.db` (SQLite). 
+*   **Linked Message history**: Every turn is linked to its parent, enabling deep contextual continuity.
+*   **User Profiles**: Stores identities (e.g., Fredrick, Lead Architect) to personalize every interaction.
+*   **Assistant Registry**: Stores configurations for dozens of specialized AI personas.
 
-The framework is composed of five distinct stations:
+### 👻 Soul (`meat_box.py`)
+**The Persona Factory.** Dynamically constructs high-impact system prompts.
+*   **Behavioral Injection**: Automatically adds "Behavioral Modules" (NSFW, Explicit Bypass, Personification) based on database flags.
+*   **Dynamic Kwargs**: Handles default prompt variables (e.g., `grade=5`) from the database, allowing for zero-config execution.
 
-1.  **🧠 Lore (Flashback)** (`lore.py`)
-    *   **Memory Core**: Manages `ayra_memory.db` (SQLite).
-    *   **Session State**: Tracks conversation history, user profiles, and chat summaries.
-    *   **Configuration**: Stores all Assistant definitions and Prompt Templates.
+### 👁️ Iris (`iris_out.py`)
+**Vision & Ingestion Engine.** The RAG (Retrieval-Augmented Generation) powerhouse.
+*   **Docling Integration**: Superior structural parsing of **Web URLs** and **PDFs**.
+*   **Llava Vision**: Generates text descriptions from **Images**.
+*   **Semantic Excel**: Converts spreadsheet rows into natural language sentences for accurate vector matching.
+*   **Persistent Storage**: Uses `ChromaDB` to remember ingested data across different sessions.
 
-2.  **👻 Soul (MeatBox)** (`meat_box.py`)
-    *   **Persona Factory**: Dynamically constructs system prompts based on roles (e.g., "Math Tutor", "Debater").
-    *   **Behavioral Injection**: Automatically injects flags like `NSFW`, `Explicit Filter Bypass`, or `Personification` based on database settings.
+### 🛠️ Clutch (`clutch.py`)
+**The Autonomous Toolbox.** Provides Pydantic-validated "Gears" for the agents to use.
+*   **Finance Gears**: Real-time mortgage and compound interest calculators.
+*   **Web Gears**: Live weather fetching without API keys.
+*   **Utility Gears**: Unit conversions (metric/imperial, temperature, volume).
+*   **Self-Documenting**: Provides a `Torque` manifest that tells the AI exactly what tools are available and how to call them.
 
-3.  **👁️ Iris** (`iris_out.py`)
-    *   **Ingestion Engine**: Scrapes and parses data from URLs, PDFs, Excel, and Images.
-    *   **Structure-Aware**: Uses `Docling` to preserve document layout and `Llava` for vision analysis.
-    *   **RAG Memory**: Persists embeddings in `ChromaDB` for long-term knowledge retrieval.
+### 🛰️ Starlink (`starlink.py`)
+**The Output Hub.** Forges final artifacts and handles transmissions.
+*   **Document Forge**: Parallel production of **PDFs, Word Documents, and Excel Sheets**.
+*   **Neural Voice**: Integration with `edge-tts` for high-quality audio broadcasts.
+*   **Uplink**: Asynchronous email delivery via SMTP.
 
-4.  **🛰️ Aether (Starlink)** (`starlink.py`)
-    *   **Artifact Forge**: Asynchronously generates high-quality artifacts:
-        *   📄 Word Documents (`.docx`)
-        *   📑 PDFs (`.pdf`)
-        *   📊 Excel Sheets (`.xlsx`)
-    *   **Signals**: Generates Neural TTS Audio (`.mp3`) and handles Email dispatch.
+---
 
-5.  **🏭 Assembly** (`blueprint.py`)
-    *   **The Orchestrator**: Ties all modules together.
-    *   **Workflows**:
-        *   `once`: Single-shot query.
-        *   `sequential`: Multi-agent chain (e.g., Researcher -> Writer -> Editor).
-        *   `parallel`: Swarm execution (e.g., Advocate vs. Skeptic -> Judge).
+## 🏭 The Orchestrator: Blueprint (`blueprint.py`)
 
-## 🚀 Getting Started
+The `Assembly` class ties everything together into a logical order:
+**Ignition ➜ Ingest ➜ Tool Activation ➜ Fabrication ➜ Critique ➜ Forge.**
 
-### 1. Prerequisites
-*   Python 3.10+
-*   **Ollama** running locally.
-*   **Models**: Pull the following models:
-    ```bash
-    ollama pull mistral
-    ollama pull llama3.2
-    ollama pull gemma3
-    ollama pull qwen2.5
-    ollama pull llava
-    ollama pull nomic-embed-text
-    ```
+### 🌟 1. Dynamic Workflows
+Ayra doesn't just "chat." It executes complex logic chains:
+*   **`once`**: A single agent solves a task.
+*   **`sequential`**: A chain of `N` agents (e.g., **Brainstormer ➜ Writer ➜ Editor**). Output from one flows into the next.
+*   **`parallel`**: A swarm of agents (e.g., **Advocate vs. Skeptic**) debate a topic, with a final **Judge** synthesizing the result.
 
-### 2. Installation
-Clone the repo and install dependencies:
-```bash
-pip install langchain langchain-community langchain-ollama langchain-chroma langchain-docling langchain-text-splitters
-pip install pandas openpyxl python-docx fpdf2 aiosmtplib edge-tts pillow reportlab
-```
+### 🌟 2. Intelligent Tooling
+If `use_tools=True`, Station 3 uses an LLM to scan the `Torque` manifest. If the user asks for a calculation, the orchestrator executes the Python tool *before* the agents start writing, ensuring the numbers are 100% accurate.
 
-### 3. Bootstrap the System
-Initialize the database and generate the configuration CSVs. **Run this once.**
-```bash
-python3 persona_rocket.py bootstrap
-```
-This creates `ayra_memory.db`, `ai_assistants.csv`, and `prompt_templates.csv`.
+### 🌟 3. Quality Assurance (The Critique Loop)
+Before any file is forged, a "QA Auditor" (Kyle) checks the output against the source materials. If it fails, the assembly line re-runs (up to 2 times) with specific feedback on what to fix.
 
-## 🛠️ Configuration & Management
+---
 
-**Do not edit code to change personas.**
-*   Open **`ai_assistants.csv`** to add new roles, change prompts, or adjust default kwargs.
-*   Open **`prompt_templates.csv`** to edit reusable blocks (like NSFW filters).
-*   Run `python3 persona_rocket.py` to **sync** your CSV changes to the database.
+## ⚡ Examples of Extreme Flexibility
 
-## 💡 Usage Examples
-
-### Run a Complex Mission (`blueprint.py`)
-Use the `Assembly` class to run a multi-step mission with model overrides.
-
+### Example 1: Changing Assistant Settings on the Fly
+You can hijack a persona's database defaults at runtime.
 ```python
-import asyncio
-from blueprint import Assembly
-
-async def main():
-    orchestrator = Assembly()
-    
-    # Run a Sequential Chain
-    result = await orchestrator.execute_assembly(
-        query="Explain Quantum Computing to a 5-year old.",
-        workflow='sequential',
-        roles=["General", "Story"], 
-        outputs=['word', 'voice'], # Generate Doc & Audio
-        model_overrides={"Story": "gemma3"} # Force specific model
-    )
-    print(result)
-
-asyncio.run(main())
+# Use the 'Story' persona but force it to be safe and use a different model
+result = await orchestrator.execute_assembly(
+    query="Write a story about dragons.",
+    roles=["Story"],
+    override_settings={
+        "nsfw": False,           # Turn off NSFW
+        "explicit_filter": True, # Turn filter back on
+        "ai_name": "SafeBot",    # Change name
+        "temperature": 0.3       # Make it less random
+    },
+    model_overrides={"Story": "llama3.2"} # Force specific model
+)
 ```
 
-### Generate Content from URL (`kinetic.py`)
-Quickly scrape a website and generate a quiz or report.
-
+### Example 2: Building a Sequential Agent Chain
 ```python
-from kinetic import generate_quiz_from_url
-import asyncio
+# A math teacher generates a problem, a Disney writer adds flair, and a lawyer polishes it.
+roles = ["Math", "Story", "Professional Writer"]
+persona_kwargs = {
+    "Math": {"grade": 5, "aoq_string": "multiplication"},
+    "Story": {"theme": "Disney's Frozen"},
+    "Professional Writer": {"word_count": 200}
+}
 
-asyncio.run(generate_quiz_from_url(
-    url="https://en.wikipedia.org/wiki/Artificial_intelligence", 
-    grade=8, 
-    num_questions=5
-))
+result = await orchestrator.execute_assembly(
+    query="Give me a homework problem.",
+    workflow='sequential',
+    roles=roles,
+    persona_kwargs=persona_kwargs
+)
 ```
 
-## 🔄 Session Management
-
-Ayra supports continuous conversations.
-*   **New Session**: `session_mode='new'`
-*   **Resume Latest**: `session_mode='continue'`
-*   **Resume Specific**: Pass the UUID string.
-
-The system automatically injects previous chat history and summaries into the LLM context.
+### Example 3: Tool-Triggered Finance Session
+```python
+# This query automatically triggers Station 3 (Tool Activation) 
+# to call the mortgage_calculator in clutch.py.
+query = "I'm buying a $500k house at 6% over 30 years. What is my payment?"
+result = await orchestrator.execute_assembly(query=query, use_tools=True)
+```

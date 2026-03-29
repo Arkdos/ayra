@@ -111,6 +111,62 @@ class TextGears:
         found = list(set([w for w in words if words.count(w) > 1]))[:10]
         return f"I identified {len(found)} keywords: {', '.join([w.capitalize() for w in found])}." if found else "No keywords found."
 
+class UtilityGears:
+    """General utility tools including unit conversion."""
+
+    @staticmethod
+    def get_manifest() -> List[Dict[str, Any]]:
+        return [
+            {
+                "name": "convert_units",
+                "intent": "Convert numerical values between different units (length, weight, temperature, volume).",
+                "parameters": {
+                    "value": {"type": "number", "description": "The quantity to convert."},
+                    "category": {"type": "string", "description": "Category: 'length', 'weight', 'temp', 'volume'."},
+                    "from_unit": {"type": "string", "description": "Source unit (e.g., 'km', 'kg', 'c', 'liters')."},
+                    "to_unit": {"type": "string", "description": "Target unit (e.g., 'mi', 'lb', 'f', 'gallons')."}
+                },
+                "sample_output": "The conversion of 100 kilometers to miles is 62.14."
+            }
+        ]
+
+    @staticmethod
+    @validate_call
+    def convert_units(
+        value: float = Field(...),
+        category: str = Field(..., pattern="^(length|weight|temp|volume)$"),
+        from_unit: str = Field(...),
+        to_unit: str = Field(...)
+    ) -> str:
+        """Universal unit converter for common measurements."""
+        f, t = from_unit.lower(), to_unit.lower()
+        
+        # Temperature is unique (offset + multiplier)
+        if category == 'temp':
+            if f == 'c' and t == 'f': res = (value * 9/5) + 32
+            elif f == 'f' and t == 'c': res = (value - 32) * 5/9
+            elif f == 'c' and t == 'k': res = value + 273.15
+            elif f == 'k' and t == 'c': res = value - 273.15
+            else: return f"Temperature conversion from {f} to {t} not supported."
+            return f"{value}°{f.upper()} is {round(res, 2)}°{t.upper()}."
+
+        # Ratios relative to a base unit
+        units = {
+            'length': {'m': 1, 'km': 1000, 'cm': 0.01, 'mm': 0.001, 'mi': 1609.34, 'ft': 0.3048, 'in': 0.0254, 'yd': 0.9144},
+            'weight': {'kg': 1, 'g': 0.001, 'mg': 0.000001, 'lb': 0.453592, 'oz': 0.0283495},
+            'volume': {'l': 1, 'ml': 0.001, 'gal': 3.78541, 'qt': 0.946353, 'pt': 0.473176, 'cup': 0.236588}
+        }
+        
+        cat_units = units.get(category)
+        if f not in cat_units or t not in cat_units:
+            return f"Unit '{f}' or '{t}' not recognized in category '{category}'."
+        
+        # Convert to base, then to target
+        base_val = value * cat_units[f]
+        res = base_val / cat_units[t]
+        
+        return f"Converting {value} {f} to {t} results in {round(res, 4)} {t}."
+
 
 # --- 2. THE TORQUE ORCHESTRATOR ---
 
@@ -121,7 +177,7 @@ class Torque:
     """
 
     # Register gear classes here
-    _gears = [FinanceGears, WebGears, TextGears]
+    _gears = [FinanceGears, WebGears, TextGears, UtilityGears]
 
     @classmethod
     def get_tool_manifest(cls) -> List[Dict[str, Any]]:
@@ -152,18 +208,6 @@ class Torque:
 
 # --- Quick Verification ---
 if __name__ == "__main__":
-    # Simulate an AI searching for all tools
     print(f"🤖 Torque Discovery: {len(Torque.get_tool_manifest())} tools active.")
-    
-    # Test execution via the Torque central hub
-    print("\n⚡ Executing Mortgage Tool via Torque:")
-    result = Torque.execute("mortgage_calculator", principal=350000, annual_rate=6.2, years=30)
-    print(result)
-
-    print("\n⚡ Executing Weather Tool via Torque:")
-    result = Torque.execute("get_weather", city="Vancouver")
-    print(result)
-
-    print("\n❌ Testing Validation via Torque:")
-    result = Torque.execute("mortgage_calculator", principal=-500, annual_rate=5, years=30)
-    print(result)
+    print(Torque.execute("convert_units", value=10, category="length", from_unit="km", to_unit="mi"))
+    print(Torque.execute("convert_units", value=32, category="temp", from_unit="f", to_unit="c"))
