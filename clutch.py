@@ -28,14 +28,15 @@ class FinanceGears:
             },
             {
                 "name": "compound_interest",
-                "intent": "Calculate investment growth with compound interest.",
+                "intent": "Calculate investment growth with flexible compounding and contribution periods.",
                 "parameters": {
-                    "principal": {"type": "number", "description": "The initial amount invested."},
-                    "rate": {"type": "number", "description": "The annual interest rate percentage."},
-                    "time": {"type": "number", "description": "Number of years invested."},
-                    "n": {"type": "integer", "description": "Times compounded per year (default 12)."}
+                    "principal": {"type": "number", "description": "Initial investment amount."},
+                    "rate": {"type": "number", "description": "Interest rate percentage (e.g., 7.0 for 7%)."},
+                    "rate_type": {"type": "string", "description": "Frequency of rate provided: 'monthly', 'quarterly', 'semi-annual', 'annual'."},
+                    "time_years": {"type": "number", "description": "Number of years for investment."},
+                    "compounding_frequency": {"type": "string", "description": "Compounding period: 'monthly', 'quarterly', 'semi-annual', 'annual'."}
                 },
-                "sample_output": "The total value after 10 years will be $2,009.66."
+                "sample_output": "An initial $1,000 at 7% annual rate compounded monthly for 10 years results in $2,009.66."
             }
         ]
 
@@ -59,11 +60,33 @@ class FinanceGears:
     def compound_interest(
         principal: float = Field(..., gt=0),
         rate: float = Field(..., ge=0),
-        time: float = Field(..., gt=0),
-        n: int = Field(12, gt=0)
+        rate_type: str = Field(..., pattern="^(monthly|quarterly|semi-annual|annual)$"),
+        time_years: float = Field(..., gt=0),
+        compounding_frequency: str = Field(..., pattern="^(monthly|quarterly|semi-annual|annual)$")
     ) -> str:
-        amount = principal * (1 + (rate/100)/n)**(n*time)
-        return f"Starting with ${principal:,.2f} at {rate}% compounded {n}x yearly, the value after {time} years is ${amount:,.2f}."
+        """
+        Advanced compound interest calculator that handles cross-frequency rate adjustments.
+        Formula: A = P(1 + r/n)^(nt)
+        """
+        # Map frequencies to periods per year
+        freq_map = {'monthly': 12, 'quarterly': 4, 'semi-annual': 2, 'annual': 1}
+        
+        # 1. Normalize Rate to ANNUAL (Effective Annual Rate logic if simple, but here we assume simple periodic multiplication)
+        # If user gives monthly 1%, annual is 12%.
+        annual_nominal_rate = (rate / 100) * freq_map[rate_type]
+        
+        # 2. Get Compounding periods (n)
+        n = freq_map[compounding_frequency]
+        
+        # 3. Calculate periodic rate (r/n)
+        periodic_rate = annual_nominal_rate / n
+        
+        # 4. Final Calculation
+        total_periods = n * time_years
+        final_amount = principal * (1 + periodic_rate)**total_periods
+        
+        return (f"An initial investment of ${principal:,.2f} with a {rate}% {rate_type} growth rate "
+                f"compounded {compounding_frequency} for {time_years} years results in a total value of ${final_amount:,.2f}.")
 
 
 class WebGears:
@@ -141,7 +164,6 @@ class UtilityGears:
         """Universal unit converter for common measurements."""
         f, t = from_unit.lower(), to_unit.lower()
         
-        # Temperature is unique (offset + multiplier)
         if category == 'temp':
             if f == 'c' and t == 'f': res = (value * 9/5) + 32
             elif f == 'f' and t == 'c': res = (value - 32) * 5/9
@@ -150,7 +172,6 @@ class UtilityGears:
             else: return f"Temperature conversion from {f} to {t} not supported."
             return f"{value}°{f.upper()} is {round(res, 2)}°{t.upper()}."
 
-        # Ratios relative to a base unit
         units = {
             'length': {'m': 1, 'km': 1000, 'cm': 0.01, 'mm': 0.001, 'mi': 1609.34, 'ft': 0.3048, 'in': 0.0254, 'yd': 0.9144},
             'weight': {'kg': 1, 'g': 0.001, 'mg': 0.000001, 'lb': 0.453592, 'oz': 0.0283495},
@@ -161,7 +182,6 @@ class UtilityGears:
         if f not in cat_units or t not in cat_units:
             return f"Unit '{f}' or '{t}' not recognized in category '{category}'."
         
-        # Convert to base, then to target
         base_val = value * cat_units[f]
         res = base_val / cat_units[t]
         
@@ -176,7 +196,6 @@ class Torque:
     Aggregates all specialized tool classes into a single manifest for the AI.
     """
 
-    # Register gear classes here
     _gears = [FinanceGears, WebGears, TextGears, UtilityGears]
 
     @classmethod
@@ -189,10 +208,7 @@ class Torque:
 
     @classmethod
     def execute(cls, tool_name: str, **kwargs) -> str:
-        """
-        Dynamically routes a tool call to the correct Gear class.
-        Includes a safety wrapper for validation errors.
-        """
+        """Dynamically routes a tool call to the correct Gear class."""
         for gear in cls._gears:
             if hasattr(gear, tool_name):
                 method = getattr(gear, tool_name)
@@ -203,11 +219,9 @@ class Torque:
                     return f"Validation Error: The field '{err['loc'][0]}' {err['msg']}."
                 except Exception as e:
                     return f"Execution Error: {str(e)}"
-        
-        return f"Tool '{tool_name}' not found in any registered Gear."
+        return f"Tool '{tool_name}' not found."
 
-# --- Quick Verification ---
+# --- Verification ---
 if __name__ == "__main__":
-    print(f"🤖 Torque Discovery: {len(Torque.get_tool_manifest())} tools active.")
-    print(Torque.execute("convert_units", value=10, category="length", from_unit="km", to_unit="mi"))
-    print(Torque.execute("convert_units", value=32, category="temp", from_unit="f", to_unit="c"))
+    print(Torque.execute("compound_interest", principal=1000, rate=1, rate_type="monthly", time_years=10, compounding_frequency="monthly"))
+    print(Torque.execute("convert_units", value=100, category="length", from_unit="mi", to_unit="km"))
