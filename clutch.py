@@ -24,19 +24,19 @@ class FinanceGears:
                     "annual_rate": {"type": "number", "description": "Annual interest rate percentage (e.g., 5.5)."},
                     "years": {"type": "integer", "description": "Loan term in years (must be 1-50)."}
                 },
-                "sample_output": "For a $300,000 loan at 5% for 30 years, the monthly payment is $1,610.46."
+                "sample_output": "The monthly mortgage payment for a principal of $300,000 at 5% interest over 30 years is $1,610.46."
             },
             {
                 "name": "compound_interest",
-                "intent": "Calculate investment growth with flexible compounding and contribution periods.",
+                "intent": "Calculate investment growth with flexible growth rates and compounding periods.",
                 "parameters": {
                     "principal": {"type": "number", "description": "Initial investment amount."},
-                    "rate": {"type": "number", "description": "Interest rate percentage (e.g., 7.0 for 7%)."},
+                    "rate": {"type": "number", "description": "Growth rate percentage (e.g., 1.5)."},
                     "rate_type": {"type": "string", "description": "Frequency of rate provided: 'monthly', 'quarterly', 'semi-annual', 'annual'."},
                     "time_years": {"type": "number", "description": "Number of years for investment."},
                     "compounding_frequency": {"type": "string", "description": "Compounding period: 'monthly', 'quarterly', 'semi-annual', 'annual'."}
                 },
-                "sample_output": "An initial $1,000 at 7% annual rate compounded monthly for 10 years results in $2,009.66."
+                "sample_output": "An initial $1,000 with a 1.5% monthly growth rate compounded quarterly for 10 years results in $1,970.40."
             }
         ]
 
@@ -51,42 +51,42 @@ class FinanceGears:
         n = years * 12
         try:
             payment = (principal / n) if r == 0 else (principal * r * (1 + r)**n) / ((1 + r)**n - 1)
-            return f"For a principal of ${principal:,.2f} at {annual_rate}% over {years} years, the monthly payment is ${payment:,.2f}."
+            return f"The calculated monthly payment for a principal of ${principal:,.2f} at an annual interest rate of {annual_rate}% over {years} years is ${payment:,.2f}."
         except:
-            return "Error calculating mortgage. Check inputs."
+            return "I encountered an error calculating that mortgage. Please check your numbers."
 
     @staticmethod
     @validate_call
     def compound_interest(
-        principal: float = Field(..., gt=0),
-        rate: float = Field(..., ge=0),
-        rate_type: str = Field(..., pattern="^(monthly|quarterly|semi-annual|annual)$"),
-        time_years: float = Field(..., gt=0),
-        compounding_frequency: str = Field(..., pattern="^(monthly|quarterly|semi-annual|annual)$")
+        principal: float = Field(..., gt=0, description="Initial investment amount."),
+        rate: float = Field(..., ge=0, description="Growth rate percentage."),
+        rate_type: str = Field(..., pattern="^(monthly|quarterly|semi-annual|annual)$", description="Frequency of the provided rate."),
+        time_years: float = Field(..., gt=0, description="Number of years for investment."),
+        compounding_frequency: str = Field(..., pattern="^(monthly|quarterly|semi-annual|annual)$", description="Compounding period.")
     ) -> str:
         """
-        Advanced compound interest calculator that handles cross-frequency rate adjustments.
-        Formula: A = P(1 + r/n)^(nt)
+        Advanced compound interest calculator with cross-frequency rate adjustment.
+        Normalizes the periodic rate into the chosen compounding period.
         """
         # Map frequencies to periods per year
         freq_map = {'monthly': 12, 'quarterly': 4, 'semi-annual': 2, 'annual': 1}
         
-        # 1. Normalize Rate to ANNUAL (Effective Annual Rate logic if simple, but here we assume simple periodic multiplication)
-        # If user gives monthly 1%, annual is 12%.
-        annual_nominal_rate = (rate / 100) * freq_map[rate_type]
+        # 1. Convert the provided rate to an annual effective rate
+        # (1 + r_periodic)^(periods_per_year) - 1
+        # Example: 1.5% monthly -> (1 + 0.015)^12 - 1
+        annual_effective_rate = (1 + (rate / 100))**freq_map[rate_type] - 1
         
-        # 2. Get Compounding periods (n)
-        n = freq_map[compounding_frequency]
+        # 2. Convert annual effective rate to the periodic rate for the compounding frequency
+        # (1 + r_annual_effective)^(1 / periods_per_year_compounding) - 1
+        n_compounding = freq_map[compounding_frequency]
+        periodic_compounding_rate = (1 + annual_effective_rate)**(1 / n_compounding) - 1
         
-        # 3. Calculate periodic rate (r/n)
-        periodic_rate = annual_nominal_rate / n
+        # 3. Final Calculation: A = P(1 + r_periodic_compounding)^(total_periods)
+        total_periods = n_compounding * time_years
+        final_amount = principal * (1 + periodic_compounding_rate)**total_periods
         
-        # 4. Final Calculation
-        total_periods = n * time_years
-        final_amount = principal * (1 + periodic_rate)**total_periods
-        
-        return (f"An initial investment of ${principal:,.2f} with a {rate}% {rate_type} growth rate "
-                f"compounded {compounding_frequency} for {time_years} years results in a total value of ${final_amount:,.2f}.")
+        return (f"Starting with an initial investment of ${principal:,.2f}, an assumed {rate}% {rate_type} growth rate "
+                f"compounded {compounding_frequency}, the total value after {time_years} years will be ${final_amount:,.2f}.")
 
 
 class WebGears:
@@ -108,9 +108,9 @@ class WebGears:
     def get_weather(city: str = Field(..., min_length=1)) -> str:
         try:
             res = requests.get(f"https://wttr.in/{city}?format=3", timeout=5)
-            return f"The current weather in {city.title()} is {res.text.strip()}." if res.status_code == 200 else "Weather unavailable."
+            return f"The current weather in {city.title()} is {res.text.strip()}." if res.status_code == 200 else "I'm sorry, I was unable to retrieve the weather data for that city."
         except:
-            return "Connection error while fetching weather."
+            return "I encountered a network error while attempting to fetch the weather report."
 
 
 class TextGears:
@@ -121,9 +121,9 @@ class TextGears:
         return [
             {
                 "name": "extract_keywords",
-                "intent": "Find recurring words in a text.",
+                "intent": "Find important recurring words in a text.",
                 "parameters": {"text": {"type": "string", "description": "Text to analyze."}},
-                "sample_output": "I identified the following keywords: AI, Logic, Data."
+                "sample_output": "I identified the following keywords in the text: AI, Logic, Data."
             }
         ]
 
@@ -132,24 +132,26 @@ class TextGears:
     def extract_keywords(text: str = Field(..., min_length=10)) -> str:
         words = re.findall(r'\w{5,}', text.lower())
         found = list(set([w for w in words if words.count(w) > 1]))[:10]
-        return f"I identified {len(found)} keywords: {', '.join([w.capitalize() for w in found])}." if found else "No keywords found."
+        if found:
+            return f"I analyzed the text and identified the following recurring keywords: {', '.join([w.capitalize() for w in found])}."
+        return "I processed the text but did not find any significant recurring keywords."
 
 class UtilityGears:
-    """General utility tools including unit conversion."""
+    """General utility tools including universal unit conversion."""
 
     @staticmethod
     def get_manifest() -> List[Dict[str, Any]]:
         return [
             {
                 "name": "convert_units",
-                "intent": "Convert numerical values between different units (length, weight, temperature, volume).",
+                "intent": "Convert numerical values between different types of units (length, weight, temperature, volume).",
                 "parameters": {
-                    "value": {"type": "number", "description": "The quantity to convert."},
+                    "value": {"type": "number", "description": "The amount to convert."},
                     "category": {"type": "string", "description": "Category: 'length', 'weight', 'temp', 'volume'."},
-                    "from_unit": {"type": "string", "description": "Source unit (e.g., 'km', 'kg', 'c', 'liters')."},
-                    "to_unit": {"type": "string", "description": "Target unit (e.g., 'mi', 'lb', 'f', 'gallons')."}
+                    "from_unit": {"type": "string", "description": "Source unit (e.g., 'km', 'kg', 'c', 'l')."},
+                    "to_unit": {"type": "string", "description": "Target unit (e.g., 'mi', 'lb', 'f', 'gal')."}
                 },
-                "sample_output": "The conversion of 100 kilometers to miles is 62.14."
+                "sample_output": "A measurement of 100 kilometers is equivalent to approximately 62.14 miles."
             }
         ]
 
@@ -169,8 +171,8 @@ class UtilityGears:
             elif f == 'f' and t == 'c': res = (value - 32) * 5/9
             elif f == 'c' and t == 'k': res = value + 273.15
             elif f == 'k' and t == 'c': res = value - 273.15
-            else: return f"Temperature conversion from {f} to {t} not supported."
-            return f"{value}°{f.upper()} is {round(res, 2)}°{t.upper()}."
+            else: return f"Temperature conversion from '{f}' to '{t}' is not supported."
+            return f"A temperature of {value}°{f.upper()} is equivalent to {round(res, 2)}°{t.upper()}."
 
         units = {
             'length': {'m': 1, 'km': 1000, 'cm': 0.01, 'mm': 0.001, 'mi': 1609.34, 'ft': 0.3048, 'in': 0.0254, 'yd': 0.9144},
@@ -179,13 +181,15 @@ class UtilityGears:
         }
         
         cat_units = units.get(category)
+        if cat_units is None:
+            return f"The category '{category}' is not supported."
         if f not in cat_units or t not in cat_units:
-            return f"Unit '{f}' or '{t}' not recognized in category '{category}'."
+            return f"The unit '{f}' or '{t}' was not recognized in the '{category}' category."
         
         base_val = value * cat_units[f]
         res = base_val / cat_units[t]
         
-        return f"Converting {value} {f} to {t} results in {round(res, 4)} {t}."
+        return f"A measurement of {value} {f} is equivalent to approximately {round(res, 4)} {t}."
 
 
 # --- 2. THE TORQUE ORCHESTRATOR ---
@@ -193,7 +197,7 @@ class UtilityGears:
 class Torque:
     """
     Torque: The Central Transmission for Ayra Gears.
-    Aggregates all specialized tool classes into a single manifest for the AI.
+    Outputs are formatted in natural language for direct AI consumption.
     """
 
     _gears = [FinanceGears, WebGears, TextGears, UtilityGears]
@@ -216,12 +220,14 @@ class Torque:
                     return method(**kwargs)
                 except ValidationError as e:
                     err = e.errors()[0]
-                    return f"Validation Error: The field '{err['loc'][0]}' {err['msg']}."
+                    return f"Validation Error: The parameter '{err['loc'][0]}' {err['msg']}."
                 except Exception as e:
-                    return f"Execution Error: {str(e)}"
-        return f"Tool '{tool_name}' not found."
+                    return f"I encountered an unexpected execution error: {str(e)}"
+        return f"The tool '{tool_name}' was not found in the current inventory."
 
 # --- Verification ---
 if __name__ == "__main__":
-    print(Torque.execute("compound_interest", principal=1000, rate=1, rate_type="monthly", time_years=10, compounding_frequency="monthly"))
+    # Test Compound Interest normalization (1.5% monthly for 10 years compounded quarterly)
+    print(Torque.execute("compound_interest", principal=1000, rate=1.5, rate_type="monthly", time_years=10, compounding_frequency="quarterly"))
+    # Test Unit Conversion
     print(Torque.execute("convert_units", value=100, category="length", from_unit="mi", to_unit="km"))
