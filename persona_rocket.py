@@ -50,4 +50,4 @@ if __name__ == "__main__":
         else:
             launch_rocket(fb_instance)
             # Optional: Export back to ensure formatting consistency?
-            # export_rocket(fb_instance)
+            export_rocket(fb_instance)
